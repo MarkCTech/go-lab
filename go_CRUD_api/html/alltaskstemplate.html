@@ -1,0 +1,33 @@
+<h1>{{ .Title }}</h1>
+<body> 
+	<p>{{ .AllTasks }}</p>
+	<h2>{{ .AddNewTitle }}</h2>
+	<form method="POST" action="todos">
+		<label for="inputTitle">Task Name:</label>
+		<input type="text" name="inputTitle"><br><br>
+		<label for="inputComplete">Completed Status:</label>
+		<input type="checkbox" name="inputComplete" data-val="true" value="true"><br><br>
+		<input type="submit" value="Submit"><br><br>
+	</form>
+
+	<form method="POST" action="todos/status">
+		<label for="statusId">Enter ID to edit complete status: </label>
+		<input type="text" name="statusId"><br><br>
+		<label for="statusComplete">Completed Status:</label>
+		<input type="checkbox" name="statusComplete" data-val="true" value="true"><br><br>
+		<input type="submit" value="complete"><br><br>
+	</form>
+
+	<form method="POST" action="todos/delete">
+		<label for="deleteId">Enter ID to Delete: </label>
+		<input type="text" name="inputId"><br><br>
+		<input type="submit" value="DELETE">
+
+	</form>
+
+	
+	<footer>
+		<a href="/">Home Page</a><br>
+		<a href="/contact">Contact me</a>
+	</footer>
+</body>

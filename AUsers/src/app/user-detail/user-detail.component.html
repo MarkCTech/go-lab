@@ -1,0 +1,19 @@
+<div *ngIf="user">
+    <h2>{{user.name}}'s Details</h2>
+    <div><span>id: </span>{{user.id}}</div>
+    <div><span>Pennies: </span>{{user.pennies}}</div>
+    <br>
+    <div>
+        <label for="username">Change name: </label>
+        <input id="username" [(ngModel)]="user.name" placeholder="Username"/>
+    </div>
+    <br>
+    <div>
+        <label for="pennies">Change pennies: </label>
+        <input id="pennies" [(ngModel)]="user.pennies" placeholder="pennies"/>
+    </div>
+    <button type="button" (click)="save()">save</button>
+    <br>
+    <button type="button" (click)="goBack()">go back</button>
+</div>
+    

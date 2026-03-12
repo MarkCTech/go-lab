@@ -1,0 +1,14 @@
+<div id="search-component">
+    <label for="search-box">Search User:</label>
+    <input #searchBox id="search-box" (click)="searchShow()" (input)="search(searchBox.value)" />
+
+    <ng-container *ngIf="show">
+      <ul class="search-result">
+        <li *ngFor="let user of users$ | async" >
+            <a (click)="searchToggle()" [routerLink]="['/detail/', user.id]">
+              {{user.name}}
+            </a>
+        </li>
+      </ul>
+    </ng-container>
+</div>
