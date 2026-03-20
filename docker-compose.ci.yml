@@ -1,0 +1,15 @@
+# CI-only: enables Docker BuildKit GHA cache when merged with docker-compose.yml.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml build ...
+services:
+  backend:
+    build:
+      cache_from:
+        - type=gha,scope=backend
+      cache_to:
+        - type=gha,mode=max,scope=backend
+  frontend:
+    build:
+      cache_from:
+        - type=gha,scope=frontend
+      cache_to:
+        - type=gha,mode=max,scope=frontend
