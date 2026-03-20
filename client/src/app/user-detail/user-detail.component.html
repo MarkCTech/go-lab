@@ -5,13 +5,14 @@
     <br>
     <div>
         <label for="username">Change name: </label>
-        <input id="username" [(ngModel)]="user.name" placeholder="Username"/>
+        <input id="username" [(ngModel)]="user.name" maxlength="100" placeholder="Username"/>
     </div>
     <br>
     <div>
         <label for="pennies">Change pennies: </label>
-        <input id="pennies" [(ngModel)]="user.pennies" placeholder="pennies"/>
+        <input id="pennies" type="number" min="0" step="1" [(ngModel)]="user.pennies" placeholder="pennies"/>
     </div>
+    <p *ngIf="saveError" style="color: #c33;">{{saveError}}</p>
     <button type="button" (click)="save()">save</button>
     <br>
     <button type="button" (click)="goBack()">go back</button>

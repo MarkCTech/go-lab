@@ -1,8 +1,9 @@
-import { Component, OnInit, Input } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import {User} from '../user';
-import { Router, ParamMap, ActivatedRoute} from '@angular/router';
+import { ActivatedRoute} from '@angular/router';
 import { Location } from '@angular/common';
 import { UserService } from '../user.service';
+import { MessageService } from '../message.service';
 
 @Component({
   selector: 'app-user-detail',
@@ -11,33 +12,41 @@ import { UserService } from '../user.service';
 })
 export class UserDetailComponent implements OnInit {
   user!: User;
-  id!: Number;
+  id!: number;
+  saveError = '';
 
   constructor(
     private route: ActivatedRoute,
     private userService: UserService,
-    private location: Location
+    private location: Location,
+    private messageService: MessageService
   ) { }
 
-  ngOnInit() {
-    this.id= this.id;
+  ngOnInit(): void {
     this.getUser();
   }
 
   getUser(): void {
-   this.id = Number(this.route.paramMap.subscribe(params => {
-      const id = params.get('id');
-      if (id != null) {
-        this.id = +id;
-      }    
+    const id = this.route.snapshot.paramMap.get('id');
+    if (!id) {
+      return;
+    }
+    this.id = +id;
     this.userService.getUser(this.id).subscribe(user => this.user = user);
-  }))
   }
 
   save(): void {
     if (this.user) {
+      this.saveError = '';
       this.userService.updateUser(this.user)
-      .subscribe(() => this.goBack());
+      .subscribe((updated) => {
+        if (!updated) {
+          this.saveError = 'Save failed. Check messages for details.';
+          return;
+        }
+        this.messageService.add(`Saved user id=${updated.id}`);
+        this.goBack();
+      });
     }
   }
 

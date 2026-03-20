@@ -25,7 +25,7 @@ module.exports = function (config) {
       suppressAll: true // removes the duplicated traces
     },
     coverageReporter: {
-      dir: require('path').join(__dirname, './coverage/crud_client'),
+      dir: require('path').join(__dirname, './coverage/go-lab-client'),
       subdir: '.',
       reporters: [
         { type: 'html' },
