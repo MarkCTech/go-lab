@@ -4,7 +4,7 @@
 
 **Defaults:** Local and example configuration use the logical MySQL database name `suite_platform` and HS256 JWT issuer/audience `suite-platform` / `suite-platform-api` (see [`.env.example`](.env.example)). Override in production as needed. If you have an existing database named `todosdb` or old JWT claims, set `DB_NAME` / `JWT_*` explicitly when migrating.
 
-**Need:** Docker + Compose + Git. **Go 1.24+** only for local `go test` / `go run` (CI and the backend image match `api/go.mod`).
+**Need:** Docker + Compose + Git. **Go 1.25.8+** (or auto toolchain from `api/go.mod`) for local `go test` / `go run` (CI and the backend image match `api/go.mod`).
 
 ## First-time setup
 
