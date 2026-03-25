@@ -1,4 +1,5 @@
 // smoketest runs HTTP smoke checks against a running platform API (same scenarios as legacy scripts/test.ps1).
+// Session flow also covers refresh, join-token, desktop PKCE exchange, and change-password (see session_extras.go).
 package main
 
 import (
@@ -207,6 +208,8 @@ func main() {
 	must(code == http.StatusOK, "GET /users with session cookie should succeed")
 	must(json.Unmarshal(ucRaw, &usersCookie) == nil, "cookie users JSON")
 	must(len(usersCookie.Data) >= 1, "GET /users with session should return data")
+
+	runAuthSessionExtras(client2, jar2, base, apiURL, sessEmail, "smoke-pass-8ch", "smoke-pass-9ch-xx")
 
 	csrfOut := cookieValue(jar2, apiURL, "gl_csrf")
 	must(csrfOut != "", "csrf cookie should exist before logout")

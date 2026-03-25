@@ -1,55 +1,69 @@
-  /* HeroSearch private styles */
+.nav-user-search {
+  position: relative;
+  width: 100%;
+}
 
-label {
-    position: absolute;
-    top: 0px;
-    right: 0px;
-    display: block;
-    font-weight: bold;
-    font-size: 1.2rem;
-    margin-top: 1rem;
-    margin-bottom: .5rem;
-  }
-  input {
-    position: relative;
-    float: right;
-    top: 10px;
-    right: -170px;
-    padding: .5rem;
-    width: 160px;
-    box-sizing: border-box;
-    display: block;
-  }
-    
-  input:focus {
-    outline: #336699 auto 1px;
-  }
-    
-  li {
-    list-style-type: none;
-  }
-  .search-result li a {
-    position: relative;
-    border-bottom: 1px solid gray;
-    border-left: 1px solid gray;
-    border-right: 1px solid gray;
-    display: inline-block;
-    width: 160px;
-    padding: .5rem;
-    box-sizing: border-box;
-    text-decoration: none;
-    color: black;
-  }
+.nav-user-search-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 0.15rem;
+  line-height: 1.2;
+}
 
-  .search-result li a:hover {
-    background-color: #435A60;
-    color: white;
-  }
-    
-  ul.search-result {
-    position: relative;
-    float: right;
-    right: -325px;
-    top: 32px;
-    width: 155px;
-  }
+.nav-user-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.875rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin: 0;
+}
+
+.nav-user-search-input:focus {
+  outline: 2px solid #336699;
+  outline-offset: 1px;
+}
+
+.nav-user-search-results {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  max-height: min(240px, 50vh);
+  overflow-y: auto;
+}
+
+.nav-user-search-results li {
+  list-style-type: none;
+  margin: 0;
+}
+
+.nav-user-search-results li a {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  text-decoration: none;
+  color: #222;
+  font-size: 0.875rem;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+}
+
+.nav-user-search-results li:last-child a {
+  border-bottom: none;
+}
+
+.nav-user-search-results li a:hover {
+  background: #42545c;
+  color: #fff;
+}

@@ -47,6 +47,10 @@ label {
   padding: 0.35rem 0.5rem;
   box-sizing: border-box;
 }
+textarea.input.input-warn {
+  border-color: #c9a227;
+  background: #fffdf5;
+}
 .row {
   display: flex;
   flex-wrap: wrap;

@@ -71,9 +71,23 @@
     </div>
 
     <label>
-      Action reason (for Approve / Reject / Fulfill / Cancel below — ≥ 10 chars)
-      <textarea class="input" rows="2" [(ngModel)]="actionReason"></textarea>
+      Action reason (sent as <code>X-Platform-Action-Reason</code> for each row action below)
+      <textarea
+        class="input"
+        rows="2"
+        [(ngModel)]="actionReason"
+        [class.input-warn]="!actionReasonOk && actionReason.length > 0"
+        placeholder="At least 10 characters (e.g. ticket ID + why you approve)"
+      ></textarea>
     </label>
+    <p class="hint small" *ngIf="!actionReasonOk">
+      Approve, Reject, Fulfill, and Cancel stay disabled until this reason is at least <strong>10</strong> characters.
+    </p>
+    <p class="hint small" *ngIf="canSeeBackups && list.items.length">
+      <strong>Governance:</strong> you cannot approve or reject your <em>own</em> restore request (four-eyes). Use another
+      operator account, or have a colleague approve. Fulfill applies once the request is <code>approved</code> and you have
+      <code>backups.restore.fulfill</code>.
+    </p>
 
     <div class="table-wrap">
       <table class="grid">
@@ -97,10 +111,42 @@
             <td>{{ row.requested_by_user_id }}</td>
             <td class="mono small">{{ row.updated_at }}</td>
             <td class="actions">
-              <button *ngIf="canApproveRow(row)" type="button" class="btn sm" (click)="doApprove(row)">Approve</button>
-              <button *ngIf="canRejectRow(row)" type="button" class="btn sm" (click)="doReject(row)">Reject</button>
-              <button *ngIf="canCancelRow(row)" type="button" class="btn sm" (click)="doCancel(row)">Cancel</button>
-              <button *ngIf="canFulfillRow(row)" type="button" class="btn sm" (click)="doFulfill(row)">Fulfill</button>
+              <button
+                *ngIf="canApproveRow(row)"
+                type="button"
+                class="btn sm"
+                [disabled]="!actionReasonOk"
+                (click)="doApprove(row)"
+              >
+                Approve
+              </button>
+              <button
+                *ngIf="canRejectRow(row)"
+                type="button"
+                class="btn sm"
+                [disabled]="!actionReasonOk"
+                (click)="doReject(row)"
+              >
+                Reject
+              </button>
+              <button
+                *ngIf="canCancelRow(row)"
+                type="button"
+                class="btn sm"
+                [disabled]="!actionReasonOk"
+                (click)="doCancel(row)"
+              >
+                Cancel
+              </button>
+              <button
+                *ngIf="canFulfillRow(row)"
+                type="button"
+                class="btn sm"
+                [disabled]="!actionReasonOk"
+                (click)="doFulfill(row)"
+              >
+                Fulfill
+              </button>
             </td>
           </tr>
         </tbody>

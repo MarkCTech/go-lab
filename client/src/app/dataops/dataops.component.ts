@@ -103,6 +103,11 @@ export class DataopsComponent implements OnInit {
     return this.hasPerm(PERM_RESTORE_FULFILL);
   }
 
+  /** Shared action reason for row buttons; server requires ≥ 10 characters. */
+  get actionReasonOk(): boolean {
+    return this.actionReason.trim().length >= 10;
+  }
+
   submitCreate(): void {
     const reason = this.createReason.trim();
     if (reason.length < 10) {
