@@ -135,6 +135,8 @@ CREATE TABLE `backup_restore_requests` (
   KEY `idx_backup_restore_status` (`status`),
   KEY `idx_backup_restore_requested_by` (`requested_by_user_id`),
   KEY `idx_backup_restore_created` (`created_at`),
+  KEY `fk_backup_restore_approval_1` (`approval_1_user_id`),
+  KEY `fk_backup_restore_approval_2` (`approval_2_user_id`),
   CONSTRAINT `fk_backup_restore_approval_1` FOREIGN KEY (`approval_1_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_backup_restore_approval_2` FOREIGN KEY (`approval_2_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_backup_restore_requested_by` FOREIGN KEY (`requested_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
