@@ -2,7 +2,7 @@
 
 **Audience:** suite architecture and schema planning. **Go-lab** migrations only cover the **platform** slice; TaskStack and Marble carry their own databases (or schemas) in their repos, linked by **`platform_user_id`** (or equivalent UUID) as a contract.
 
-**Related:** [MASTER_PLAN.md](MASTER_PLAN.md) §2–§6 · [adr-account-linking.md](adr-account-linking.md) · [desktop-auth-bridge.md](desktop-auth-bridge.md) · [openapi.yaml](openapi.yaml)
+**Related:** [MASTER_PLAN.md](MASTER_PLAN.md) §2–§6 · [platform-control-plane.md](platform-control-plane.md) (Phase A API/DB slice vs stubs) · [adr-account-linking.md](adr-account-linking.md) · [desktop-auth-bridge.md](desktop-auth-bridge.md) · [openapi.yaml](openapi.yaml)
 
 ---
 

@@ -12,6 +12,11 @@ import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
 import { UserSearchComponent } from './user-search/user-search.component';
 import { LoginComponent } from './login/login.component';
 import { RegisterComponent } from './register/register.component';
+import { PlayersComponent } from './players/players.component';
+import { CharactersComponent } from './characters/characters.component';
+import { DataopsComponent } from './dataops/dataops.component';
+import { SecurityComponent } from './security/security.component';
+import { AuditComponent } from './audit/audit.component';
 import { AuthService } from './auth.service';
 import { AuthInterceptor } from './auth.interceptor';
 import { CredentialsInterceptor } from './credentials.interceptor';
@@ -32,7 +37,12 @@ export function authAppInit(auth: AuthService) {
     DashboardComponent,
     UserSearchComponent,
     LoginComponent,
-    RegisterComponent
+    RegisterComponent,
+    PlayersComponent,
+    CharactersComponent,
+    DataopsComponent,
+    SecurityComponent,
+    AuditComponent
   ],
   imports: [BrowserModule, AppRoutingModule, FormsModule, HttpClientModule],
   providers: [

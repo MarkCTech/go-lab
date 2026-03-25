@@ -10,12 +10,12 @@
 
 1. [Executive snapshot](#1-executive-snapshot)
 2. [Product Suite Architecture Spec v0.1 (condensed)](#2-product-suite-architecture-spec-v01-condensed)
-3. [Go-lab platform API — architecture spec v0.1](#3-go-lab-platform-api--architecture-spec-v01)
+3. [Go-lab platform API (this repo)](#3-go-lab-platform-api-this-repo)
 4. [Go-lab repo — implementation reality](#4-go-lab-repo--implementation-reality)
 5. [Version stance (suite vs repo)](#5-version-stance-suite-vs-repo)
 6. [Architecture decisions (consensus)](#6-architecture-decisions-consensus)
 7. [Shipped vs still open](#7-shipped-vs-still-open)
-8. [Roadmap phases (operator)](#8-roadmap-phases-operator)
+8. [Roadmap phases](#8-roadmap-phases)
 9. [Prioritized backlog](#9-prioritized-backlog)
 10. [Open questions](#10-open-questions)
 11. [Constraints & ground rules](#11-constraints--ground-rules)
@@ -47,25 +47,9 @@
 
 ## 2. Product Suite Architecture Spec v0.1 (condensed)
 
-**Products:** **Marble** — simulation + netcode authority. **TaskStack** — accounts / orchestration UX (consumes platform API). **Go-lab** — this repo: platform API, admin SPA, migrations.
+**Marble** (game authority) · **TaskStack** (suite control-plane UX, consumes API) · **Go-lab** (this repo: API + admin SPA + migrations). **Principles:** additive platform, multi-repo contracts, Compose-first. **Schema:** migrations only; **API:** `/api/v1`, contract [openapi.yaml](openapi.yaml). **Non-goals (v0.1):** microservices split, enterprise SSO, global matchmaking, full streaming stack.
 
-**Principles:** Gameplay can stay offline; platform is additive. **Multi-repo** with explicit contracts. **Self-host Docker Compose** first; split-host / cloud later without boundary rewrites.
-
-**MySQL:** schema = **migrations only**. **API:** JSON `/api/v1`, additive changes preferred; **formal contract:** [openapi.yaml](openapi.yaml) (validated in CI). **Trust:** clients trust API; game server trusts platform tokens later; platform never trusts client gameplay state.
-
-**Deploy:** (A) single-host Compose — primary. (B) split host. (C) managed cloud.
-
-**Security / observability / quality:** env config, validation, CORS allowlist, envelopes, no secrets in repo; structured logs; health + smoke; CI green; release = migrations + upgrade path.
-
-**Non-goals (v0.1):** microservices split, enterprise SSO, global matchmaking, full streaming stack.
-
-**Suite roadmap (spec):** (1) **Stabilize core** — API conventions, auth, smoke, docs/runbook. (2) **Control plane** — TaskStack auth flows, entitlements sketch, OpenAPI, contract tests. (3) **Marble bridge** — handshake, token validation, heartbeat, split-host guidance.
-
-**Versioning:** spec `vMAJOR.MINOR`; breaking boundaries → changelog + migration note + compatibility statement.
-
-*Long-form suite prose may live outside the repo. **§9** is always the execution backlog.*
-
-**Data ownership & gameplay persistence design (deep dive):** [data-ownership.md](data-ownership.md) — platform vs TaskStack vs Marble, TaskStack signup → platform user, authority/sync/anti-cheat, DB hot path vs async persistence.
+**Deep dive:** [data-ownership.md](data-ownership.md). **Phase A RBAC + routes:** [platform-control-plane.md](platform-control-plane.md). **Execution backlog:** §9.
 
 ---
 
@@ -84,10 +68,11 @@ Self-hostable **Go API**: users, auth/session, tokens, health/readiness. **Owns:
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Backend**    | `api/` — Gin, `middleware/`, `auth/`, `authstore/`, `myhandlers/`                                                                                                                             |
 | **Frontend**   | `client/` — Angular admin SPA                                                                                                                                                                 |
-| **Migrations** | `migrations/` — `000002_*` auth/session/users; `000003_*` `user_identities`; `000004_*` `auth_desktop_exchange_codes`                                                                         |
+| **Migrations** | `migrations/` — full chain `000001`–`000005`: [migrations.md](migrations.md) |
 | **Compose**    | `docker-compose.yml` — mysql, migrate, backend, frontend; optional **`redis`** profile                                                                                                        |
 | **Docs**       | Topic guides under `docs/`; index [README.md](README.md); CI summary [ci.md](ci.md)                                                                                                           |
 | **Key env**    | See `[.env.example](../.env.example)`: `JWT_*`, `JOIN_TOKEN_TTL_SECONDS`, `DESKTOP_EXCHANGE_*`, `SESSION_*`, `OIDC_*`, `REDIS_URL`, `MIGRATION_EXPECTED_VERSION`, CSRF, platform client creds |
+| **Operator RBAC** | DB: [platform-operator-roles.md](platform-operator-roles.md). Boundaries + matrix: [platform-control-plane.md](platform-control-plane.md). |
 
 
 ---
@@ -140,14 +125,14 @@ Topic detail: [README.md](README.md).
 | Desktop exchange + join-token API                                                | **Shipped** — `POST /auth/desktop/start` + `/auth/desktop/exchange` (PKCE, `000004_*`) + `POST /auth/join-token` ([desktop-auth-bridge.md](desktop-auth-bridge.md), [openapi.yaml](openapi.yaml)); game validates join JWT (suite-owned) |
 | CSRF                                                                             | **Shipped**                                                                                                                                                                                                                              |
 | Rate limits + email lockout                                                      | **Shipped** (memory default; [Redis optional](auth-session.md))                                                                                                                                                                          |
-| Admin Angular UX                                                                 | **Shipped** ([platform-admin-ui.md](platform-admin-ui.md))                                                                                                                                                                               |
+| Admin Angular UX (+ positioning vs TaskStack)                                    | **Shipped** ([platform-admin-ui.md](platform-admin-ui.md))                                                                                                                                                                               |
 | OIDC + `user_identities`                                                         | **Shipped** when `OIDC_*` set ([oidc-auth0.md](oidc-auth0.md))                                                                                                                                                                           |
 | OpenAPI 3 spec + CI validation                                                   | **Shipped** ([openapi.yaml](openapi.yaml), [ci.md](ci.md))                                                                                                                                                                               |
 | Auth negative tests + human-only `PUT`/`DELETE` `/users`                         | **Shipped** (handler + middleware tests; [openapi.yaml](openapi.yaml) `x-requiresHumanSubject`)                                                                                                                                          |
 | Migration schema golden + CI check                                               | **Shipped** ([migrations/schema_golden.sql](../migrations/schema_golden.sql), [scripts/check-schema-golden.sh](../scripts/check-schema-golden.sh), [migrations.md](migrations.md))                                                       |
 | TLS reverse-proxy + cookie runbook                                               | **Shipped** ([tls-reverse-proxy.md](tls-reverse-proxy.md))                                                                                                                                                                               |
 | Ops secret rotation checklist                                                    | **Shipped** ([ops-secret-rotation.md](ops-secret-rotation.md))                                                                                                                                                                           |
-| Admin vs TaskStack positioning                                                   | **Shipped** ([platform-admin-ui.md](platform-admin-ui.md))                                                                                                                                                                               |
+| Phase A control plane                                                            | **Shipped** — `000005_*`; RBAC on `/api/v1` routes in [platform-control-plane.md](platform-control-plane.md); [openapi.yaml](openapi.yaml) |
 
 
 ---
@@ -157,7 +142,7 @@ Topic detail: [README.md](README.md).
 
 | Phase                                       | Summary                                                                                                                                                                                                                    |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A** Platform control plane foundations    | Define domain boundaries (`identity_*`, `player_*`, `character_*`, `session_*`, `backup_*`, `audit_*`), RBAC matrix, privileged action guardrails (reason + correlation ID + audit), and Angular IA ↔ API resource parity. |
+| **A** Platform control plane foundations    | **Shipped (v0):** domain boundaries + RBAC matrix + privileged ack path + read-only stubs + Angular sections; full IA/data parity → Phase B/C ([platform-control-plane.md](platform-control-plane.md)). |
 | **B** Game operations surfaces              | Deliver player/character support workflows (sanctions, recovery, transfer), session/device trust operations, and economy ledger visibility for operator workflows.                                                         |
 | **C** DataOps + suite integration hardening | Ship backup/restore approval flows, complete Marble/TaskStack consumer semantics, and add split-host operational hardening with contract/observability checks.                                                             |
 
@@ -170,14 +155,14 @@ Order is **default execution priority** for platform work unless you reprioritiz
 
 ### P0 — Now / next session
 
-1. **Control plane v1 boundaries:** finalize domain model ownership for `identity_*`, `player_*`, `character_*`, `session_*`, `backup_*`, `audit_*` aligned with [data-ownership.md](data-ownership.md) (game hot path remains game-owned).
-2. **Admin IA + API alignment:** lock Angular module structure (`Players`, `Characters`, `DataOps`, `Security`, `Audit`) and matching `/api/v1` resource map before implementation.
-3. **Privileged action guardrails:** require reason capture + correlation IDs + immutable audit records for sanctions, character recovery, restore, and credential operations.
+1. ~~**Control plane v1 boundaries (doc):**~~ **Done** — summarized in [platform-control-plane.md](platform-control-plane.md); deep ownership remains [data-ownership.md](data-ownership.md). **Extend** concrete schemas/APIs in Phase B/C.
+2. ~~**Admin IA + API alignment:**~~ **Done (v0):** Angular sections + `/api/v1` stubs documented in OpenAPI; iterate with Phase B data.
+3. **Privileged action guardrails:** reason header + request correlation + `admin_audit_events` shipped for `POST /support/ack`; extend pattern to sanctions, character recovery, restore, and credential operations in Phase B/C.
 4. **Suite trust follow-through:** wire Marble/TaskStack consumers to exchange → desktop Bearer → join-token path; complete game-side `token_use=join` validation + heartbeat semantics (suite-owned integration side).
 
 ### P1 — Soon after
 
-1. **RBAC policy matrix implementation:** define operator/support/security roles and route-level permission checks, including explicit human-only enforcement.
+1. **RBAC extensions:** add roles/permissions and routes as Phase B surfaces ship; keep [platform-control-plane.md](platform-control-plane.md) + [`api/platformrbac/permissions.go`](../api/platformrbac/permissions.go) in sync. Baseline matrix + human-only enforcement on Phase A routes are **shipped**.
 2. **Character lifecycle workflows:** formalize restore/rename/transfer behavior, soft-delete window, and audit/event contract.
 3. **Backup/restore flows:** define policy/run/request/approval model (including high-risk two-person approval path).
 4. **Economy observability baseline:** expose immutable ledger query surfaces with support tooling hooks for dispute/anomaly review.
@@ -200,7 +185,7 @@ Order is **default execution priority** for platform work unless you reprioritiz
 ## 10. Open questions
 
 - **Bootstrap disable milestone:** *TBD* — choose **release tag** or **calendar date** per [bootstrap-sunset.md](bootstrap-sunset.md); record the choice **here** when set (and in release notes / tags as appropriate).
-- **Control plane v1 first slices:** should implementation begin with Players/Characters read models, or with DataOps/Security controls first?
+- **Control plane v1 first slices:** **resolved** — Phase A shipped security-first (RBAC, audit, stubs, Angular IA). **Phase B** owns richer Players/Characters/DataOps data and workflows ([platform-control-plane.md](platform-control-plane.md) §Phase B/C).
 - **Desktop user auth shape:** **decided** — exchange-code bridge (`/auth/desktop/start` + `/auth/desktop/exchange`) for user desktop login; avoid token-in-body on default browser login path.
 - JWT clock **leeway**: implement vs strict + NTP only?
 - Which **additional** routes **reject `client:*`** (beyond `PUT`/`DELETE` `/api/v1/users/:id`)? Scoped M2M for TaskStack server-side user sync?
@@ -222,20 +207,9 @@ Migration-only schema; **`/api/v1`** additive where possible; no secrets in fron
 
 ## 12. Agent handoff & priming
 
-**Smoke / health:** `/healthz`, `/readyz`; `scripts/test.ps1` when Docker is up. **CI:** [ci.md](ci.md).
+**Quick checks:** `/healthz`, `/readyz`; local: `scripts/test.ps1` with Docker up. **CI:** [ci.md](ci.md).
 
-**Architecture-only agent — paste as system or first message:**
-
-```text
-You are the architecture steward for the go-lab monorepo (platform API) within Marble + TaskStack (Product Suite Architecture Spec v0.1).
-
-Sources of truth (read in order):
-1) docs/MASTER_PLAN.md (this repo)
-2) docs/README.md — full doc index; then topic files as needed (data-ownership, openapi, oidc-auth0, auth-session, desktop-auth-bridge, bootstrap-sunset, jwt-rotation, migrations, adr-account-linking, platform-admin-ui, tls-reverse-proxy, ops-secret-rotation, ci)
-3) Any attached suite spec deltas
-
-Your job: shipped vs planned; flag contradictions; propose next 3 milestones with risks; do not expand scope silently. Do not implement code unless asked.
-```
+For AI/assistant context: read this file (§7/§9), then [README.md](README.md) index and topic guides as needed — do not treat long pasted prompts in-repo as required; keep answers aligned with OpenAPI + code.
 
 ---
 

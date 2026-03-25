@@ -8,7 +8,7 @@
 
 **Next (suite / game–owned or cross-repo):** wire Marble/TaskStack clients to the exchange → desktop Bearer → join-token path; implement game-side validation of `token_use=join` JWTs; heartbeat / split-host playbooks. Backlog: [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md) §9. Data model: [docs/data-ownership.md](docs/data-ownership.md).
 
-**Fresh DB:** `docker compose down -v` → up → `migrate`; set `MIGRATION_EXPECTED_VERSION=4` in `.env`. Example `DB_NAME` / `JWT_*` defaults live in [`.env.example`](.env.example) (`suite_platform`, `suite-platform`); align an existing `.env` when upgrading.
+**Fresh DB:** `docker compose down -v` → up → `migrate`; set `MIGRATION_EXPECTED_VERSION=5` in `.env`. Example `DB_NAME` / `JWT_*` defaults live in [`.env.example`](.env.example) (`suite_platform`, `suite-platform`); align an existing `.env` when upgrading.
 
 ## Rules
 

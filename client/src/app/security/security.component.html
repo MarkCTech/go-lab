@@ -1,0 +1,24 @@
+<section class="panel">
+  <h2>Security</h2>
+  <p class="hint">Your platform roles and permissions (<code>GET /api/v1/security/me</code>). Requires <code>security.read</code>.</p>
+  <pre class="mono" *ngIf="me !== null">{{ me | json }}</pre>
+  <p *ngIf="me === null" class="hint">Loading or unavailable…</p>
+</section>
+
+<section class="panel">
+  <h3>Privileged: support acknowledgment</h3>
+  <p class="hint">
+    <code>POST /api/v1/support/ack</code> with header <code>X-Platform-Action-Reason</code> (min 10 chars). Requires
+    <code>platform.support.ack</code>.
+  </p>
+  <label>
+    Reason (required)
+    <textarea [(ngModel)]="ackReason" rows="3" placeholder="Why you are recording this acknowledgment"></textarea>
+  </label>
+  <label>
+    Optional message (JSON body)
+    <input type="text" [(ngModel)]="ackMessage" placeholder="Optional note" />
+  </label>
+  <button type="button" (click)="submitAck()" [disabled]="ackReason.trim().length < 10">Submit ack</button>
+  <pre class="mono" *ngIf="ackResult !== null">{{ ackResult | json }}</pre>
+</section>

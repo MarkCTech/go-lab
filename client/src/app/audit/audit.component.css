@@ -1,0 +1,13 @@
+.panel {
+  padding: 1rem 1.5rem;
+}
+.hint {
+  color: #666;
+  font-size: 0.9rem;
+}
+.mono {
+  background: #f5f5f5;
+  padding: 1rem;
+  overflow: auto;
+  font-size: 0.85rem;
+}

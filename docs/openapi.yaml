@@ -11,6 +11,8 @@ info:
     - **Session cookie**: HttpOnly session from `POST /auth/login`. Mutating requests with cookies must send the CSRF header (`X-CSRF-Token` by default) matching the non-HttpOnly CSRF cookie. Bearer-authenticated mutating requests skip CSRF.
 
     **Human-only operations**: `PUT` and `DELETE` on `/users/{id}` require an authenticated **end-user** subject (`user:<id>` from session or user-scoped Bearer). Subjects `client:*` (machine / client_credentials) receive 403.
+
+    **Phase A control plane**: `GET /players`, `GET /characters`, `GET /backups/status`, `GET /security/me`, `GET /audit/admin-events`, and `POST /support/ack` require a **human** subject plus a **database** platform role (`user_platform_roles` → `platform_roles`; see `docs/platform-operator-roles.md`). Insufficient permissions return 403. `POST /support/ack` requires header **`X-Platform-Action-Reason`** (minimum length enforced server-side).
   version: 0.1.0
 
 servers:
@@ -21,6 +23,7 @@ tags:
   - name: health
   - name: auth
   - name: users
+  - name: platform
 
 paths:
   /healthz:
@@ -499,6 +502,162 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/players:
+    get:
+      tags: [platform]
+      summary: List players (Phase A stub)
+      operationId: platformPlayersList
+      description: Requires platform permission `players.read` and human subject `user:<id>`.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeObject"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/characters:
+    get:
+      tags: [platform]
+      summary: List characters (Phase A stub)
+      operationId: platformCharactersList
+      description: Requires platform permission `characters.read` and human subject.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeObject"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/backups/status:
+    get:
+      tags: [platform]
+      summary: Backup status (Phase A stub)
+      operationId: platformBackupsStatus
+      description: Requires platform permission `backups.read` and human subject.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeObject"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/security/me:
+    get:
+      tags: [platform]
+      summary: Current user's platform roles and effective permissions
+      operationId: platformSecurityMe
+      description: Requires platform permission `security.read` and human subject.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeSecurityMe"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/audit/admin-events:
+    get:
+      tags: [platform]
+      summary: Recent admin audit events
+      operationId: platformAuditAdminEvents
+      description: Requires platform permission `audit.read` and human subject.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeAdminAuditList"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/support/ack:
+    post:
+      tags: [platform]
+      summary: Record a privileged support acknowledgment (writes admin audit)
+      operationId: platformSupportAck
+      description: Requires `platform.support.ack`, human subject, and header `X-Platform-Action-Reason` (min length enforced). CSRF applies when using session cookie.
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: X-Platform-Action-Reason
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 10
+          description: Operator accountability reason for the action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportAckRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeSupportAck"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "429":
+          $ref: "#/components/responses/RateLimitedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -510,7 +669,7 @@ components:
       type: apiKey
       in: cookie
       name: gl_session
-      description: Session cookie from login; pair with CSRF cookie + header on unsafe methods.
+      description: Session cookie from login (default name `gl_session`; override with env `SESSION_COOKIE_NAME`). Pair with CSRF cookie + header on unsafe methods.
 
   parameters:
     UserId:
@@ -954,5 +1113,108 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/User"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeObject:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    SecurityMeData:
+      type: object
+      required: [user_id, roles, effective_permissions]
+      properties:
+        user_id:
+          type: integer
+        roles:
+          type: array
+          items:
+            type: string
+        effective_permissions:
+          type: array
+          items:
+            type: string
+
+    EnvelopeSecurityMe:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/SecurityMeData"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    AdminAuditEvent:
+      type: object
+      required: [id, created_at, auth_subject, action, resource_type]
+      properties:
+        id:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        actor_user_id:
+          type: integer
+        auth_subject:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        reason:
+          type: string
+        request_id:
+          type: string
+
+    AdminAuditListData:
+      type: object
+      required: [items, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAuditEvent"
+        limit:
+          type: integer
+
+    EnvelopeAdminAuditList:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/AdminAuditListData"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    SupportAckRequest:
+      type: object
+      properties:
+        message:
+          type: string
+
+    SupportAckData:
+      type: object
+      required: [ok, recorded]
+      properties:
+        ok:
+          type: boolean
+        recorded:
+          type: string
+
+    EnvelopeSupportAck:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/SupportAckData"
         meta:
           $ref: "#/components/schemas/Meta"

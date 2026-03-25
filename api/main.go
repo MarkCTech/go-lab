@@ -16,6 +16,7 @@ import (
 	"github.com/codemarked/go-lab/api/config"
 	"github.com/codemarked/go-lab/api/middleware"
 	"github.com/codemarked/go-lab/api/myhandlers"
+	"github.com/codemarked/go-lab/api/platformrbac"
 	"github.com/codemarked/go-lab/api/redisx"
 	"github.com/codemarked/go-lab/api/requestid"
 	"github.com/codemarked/go-lab/api/respond"
@@ -130,6 +131,7 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 		desktopExchangeLim := middleware.NewFixedWindowLimiter("auth_desktop_exchange", 45, "too many desktop exchange requests")
 		csrfGetLim := middleware.NewFixedWindowLimiter("auth_csrf", 60, "too many csrf requests")
 		changePwdLim := middleware.NewFixedWindowLimiter("auth_change_password", 10, "too many password change attempts")
+		supportAckLim := middleware.NewFixedWindowLimiter("support_ack", 30, "too many support ack requests")
 
 		v1.POST("/auth/register", registerLim, myhandlers.RegisterUser(cfg))
 		v1.POST("/auth/login", loginLim, myhandlers.LoginUser(cfg))
@@ -164,6 +166,31 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 		users.POST("", myhandlers.CreateUser)
 		users.PUT("/:id", middleware.RequireHumanUser(), myhandlers.UpdateUser)
 		users.DELETE("/:id", middleware.RequireHumanUser(), myhandlers.DeleteUser)
+
+		cp := v1.Group("")
+		cp.Use(middleware.BearerOrSession(myhandlers.TokenSvc, myhandlers.AuthStore, cfg.SessionCookieName, oidc))
+		cp.Use(middleware.RequireHumanUser())
+		{
+			cp.GET("/players",
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermPlayersRead),
+				myhandlers.ListPlayersStub)
+			cp.GET("/characters",
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermCharactersRead),
+				myhandlers.ListCharactersStub)
+			cp.GET("/backups/status",
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermBackupsRead),
+				myhandlers.GetBackupsStatusStub)
+			cp.GET("/security/me",
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermSecurityRead),
+				myhandlers.GetSecurityMeRoles)
+			cp.GET("/audit/admin-events",
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermAuditRead),
+				myhandlers.ListAdminAuditEvents)
+			cp.POST("/support/ack", supportAckLim,
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermSupportAck),
+				middleware.RequirePlatformActionReason(10),
+				myhandlers.PostSupportAck)
+		}
 	}
 
 	return r

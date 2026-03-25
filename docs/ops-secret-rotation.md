@@ -4,13 +4,7 @@ Use this as an operator checklist when rotating credentials. Details for HS256 J
 
 ## HS256 platform JWT (`JWT_SECRET`)
 
-1. Generate a new secret (≥32 characters).
-2. Set `**JWT_SECRET_PREVIOUS**` to the current `**JWT_SECRET**`, then set `**JWT_SECRET**` to the new value.
-3. Redeploy / restart all API instances so both secrets verify during overlap.
-4. After `**JWT_ACCESS_TTL_SECONDS**` (plus a small buffer), remove `**JWT_SECRET_PREVIOUS**` so only the new secret signs tokens.
-5. Confirm `**POST /api/v1/auth/token**` and existing Bearer clients re-fetch tokens as needed.
-
-See [jwt-rotation.md](jwt-rotation.md).
+Overlap signing with `JWT_SECRET_PREVIOUS`, wait past access TTL, then drop the previous secret. **Full procedure and rationale:** [jwt-rotation.md](jwt-rotation.md). After rotation, confirm `POST /api/v1/auth/token` and Bearer clients still work.
 
 ## Platform client credentials (`PLATFORM_CLIENT_ID` / `PLATFORM_CLIENT_SECRET`)
 

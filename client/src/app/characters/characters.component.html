@@ -1,0 +1,6 @@
+<section class="panel">
+  <h2>Characters</h2>
+  <p class="hint">Phase A stub; authoritative character data is Marble-owned.</p>
+  <pre class="mono" *ngIf="data !== null">{{ data | json }}</pre>
+  <p *ngIf="data === null" class="hint">Loading or unavailable…</p>
+</section>

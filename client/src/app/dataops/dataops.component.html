@@ -1,0 +1,6 @@
+<section class="panel">
+  <h2>DataOps</h2>
+  <p class="hint">Backup / restore visibility (Phase A stub). Requires <code>backups.read</code>.</p>
+  <pre class="mono" *ngIf="data !== null">{{ data | json }}</pre>
+  <p *ngIf="data === null" class="hint">Loading or unavailable…</p>
+</section>

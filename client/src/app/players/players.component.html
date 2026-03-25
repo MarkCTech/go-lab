@@ -1,0 +1,6 @@
+<section class="panel">
+  <h2>Players</h2>
+  <p class="hint">Platform control plane (Phase A stub). Requires <code>players.read</code> via <code>user_platform_roles</code> (see repo <code>docs/platform-operator-roles.md</code>).</p>
+  <pre class="mono" *ngIf="data !== null">{{ data | json }}</pre>
+  <p *ngIf="data === null" class="hint">Loading or unavailable…</p>
+</section>

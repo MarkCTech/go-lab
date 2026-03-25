@@ -1,0 +1,6 @@
+<section class="panel">
+  <h2>Admin audit</h2>
+  <p class="hint">Immutable control-plane events from <code>admin_audit_events</code>. Requires <code>audit.read</code>.</p>
+  <pre class="mono" *ngIf="data !== null">{{ data | json }}</pre>
+  <p *ngIf="data === null" class="hint">Loading or unavailable…</p>
+</section>

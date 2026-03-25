@@ -28,20 +28,17 @@ Or:
 - `000002_*`: auth/session schema — `users` email/password/timestamps, `auth_sessions`, `auth_refresh_tokens`, `auth_audit_events`.
 - `000003_*`: `user_identities` — maps `(issuer, subject)` → local `users.id` for OIDC / external IdPs.
 - `000004_*`: `auth_desktop_exchange_codes` — one-time desktop exchange bridge (`desktop/start` -> `desktop/exchange`).
+- `000005_*`: `platform_roles`, `user_platform_roles`, `admin_audit_events` — Phase A operator RBAC + immutable control-plane audit. **Grant access:** [platform-operator-roles.md](platform-operator-roles.md). **Boundaries + matrix:** [platform-control-plane.md](platform-control-plane.md).
 
-## Readiness check
+## Readiness check (`/readyz`)
 
-Set `MIGRATION_EXPECTED_VERSION` in `.env` to the **latest applied** migration version number (integer prefix of the newest `NNNNNN_*.sql` file).
+`/readyz` **always** checks that the database responds (ping).
 
-Example: `MIGRATION_EXPECTED_VERSION=4` after `000004_*` is applied.
+**Migration version / dirty flag:** checked **only when** `MIGRATION_EXPECTED_VERSION` is set to a **positive** integer in `.env` (see [`api/config/config.go`](../api/config/config.go)). Then `/readyz` requires `schema_migrations` **not dirty** and `version >= MIGRATION_EXPECTED_VERSION`. If unset or zero, `/readyz` does **not** read `schema_migrations`.
 
-`/readyz` requires:
+Set `MIGRATION_EXPECTED_VERSION` to the integer prefix of the newest applied migration (e.g. `5` after `000005_*`).
 
-- DB ping succeeds
-- `schema_migrations` is not dirty
-- `version >= MIGRATION_EXPECTED_VERSION`
-
-If your local DB version is ahead or behind the migration files in this branch (e.g. after a branch switch or a removed migration in history), align the database with the repo’s migration chain (backup, `migrate` up/down as appropriate, or restore) before relying on automated `migrate up`.
+If your DB version drifts from this branch’s migration chain, align it (backup, `migrate` up/down, or restore) before rollout.
 
 ## Schema golden (CI drift check)
 

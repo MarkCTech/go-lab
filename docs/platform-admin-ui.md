@@ -2,36 +2,26 @@
 
 ## Role
 
-The Angular app under [`client/`](../client/) is an optional **self-host operator console** and API demo: login, dashboard, user directory CRUD. It is **not** the full TaskStack product control plane.
-
-## go-lab admin vs TaskStack (future consumer)
-
-| Topic | go-lab Angular admin | TaskStack (suite) |
-|-------|----------------------|-------------------|
-| **Purpose** | Operate this deployment: try auth flows, manage `users` rows, smoke the platform API. | Product UX for accounts, workflows, and orchestration across suite services. |
-| **Auth default** | Cookie session + CSRF against **`/api/v1`** on the same origin as the SPA (see README). | Expected to use the **same platform API** with user-centric flows (OIDC / session per product design); not limited to this Angular bundle. |
-| **API contract** | Hand-written UI against JSON envelopes; formal contract is **[openapi.yaml](openapi.yaml)**. | Should generate clients or contract-test against that OpenAPI as the suite control plane matures. |
-| **Machine vs human API use** | Logged-in operators use **`user:`** subjects (session). Dev **`client_credentials`** tokens can **list/create** users but **cannot** `PUT`/`DELETE` `/api/v1/users/{id}` (403) — those routes require a signed-in end-user. TaskStack backends that need service-level user lifecycle must either use a **human** delegated token or gain a **future** scoped service API if you add one explicitly. |
-
-TaskStack remains a **separate repo/product**; this section only clarifies how the go-lab admin fits next to it so agents and operators do not conflate “admin SPA” with “full control plane.”
-
-## Boundaries
-
-| Piece | Owns |
-|-------|------|
-| **go-lab Angular** | Cookie (or dev bootstrap) auth against this repo’s API; admin-style navigation; local operator tasks. |
-| **TaskStack** (separate product) | End-user accounts, orchestration, billing, broader control plane when integrated. |
-| **Marble** | Game client/server simulation. |
+The Angular app under [`client/`](../client/) is an optional **operator console**: login, dashboard, user directory CRUD, and **Phase A** nav (Players, Characters, DataOps, Security, Audit) calling gated `/api/v1/*` routes. It is **not** the full suite control-plane UX — positioning vs TaskStack/Marble: [MASTER_PLAN.md](MASTER_PLAN.md), [data-ownership.md](data-ownership.md), [platform-api-consumer-brief.md](platform-api-consumer-brief.md).
 
 ## Configuration
 
-See repo [README](../README.md) § Platform admin: `useBootstrapAuth`, **empty `apiBaseUrl`** + same-origin `/api` proxy (cookie sessions), CORS alignment with `CORS_ALLOWED_ORIGINS`.
+See repo [README](../README.md) § Platform admin: `useBootstrapAuth`, **`apiBaseUrl: ''`** + same-origin proxy to `/api`, CORS vs `CORS_ALLOWED_ORIGINS`.
+
+## Phase A navigation (this SPA)
+
+- **Players / Characters / DataOps:** read-only JSON views; `GET` via [`platform.service.ts`](../client/src/app/platform.service.ts) with permissions enforced server-side (see [platform-control-plane.md](platform-control-plane.md)).
+- **Security:** `GET /api/v1/security/me`; support ack **`POST /api/v1/support/ack`** with header **`X-Platform-Action-Reason`** (min length enforced server-side; UI requires ≥ 10 chars before submit).
+- **Audit:** `GET /api/v1/audit/admin-events`.
+
+**Grant platform roles in SQL** — [platform-operator-roles.md](platform-operator-roles.md).
 
 ## Session behavior
 
-- After login (or on reload when `GET /auth/csrf` succeeds), the app starts a timer that calls **`POST /api/v1/auth/refresh`** on an interval (`sessionRefreshIntervalMs` in environment files). Align that interval with **`SESSION_IDLE_TTL_SECONDS`** on the API (stay safely under idle so the cookie session slides before expiry).
-- **`UnauthorizedInterceptor`:** responses **401** from protected routes clear local auth state and navigate to **`/login`**. Expected 401s on login/register/bootstrap/token and the initial **`GET /auth/csrf`** probe do not trigger that redirect.
+- After login, or when **`GET /api/v1/auth/csrf`** succeeds on reload, the app timers **`POST /api/v1/auth/refresh`** on `sessionRefreshIntervalMs` (cookie mode; skipped when `useBootstrapAuth` is true). Keep the interval safely under **`SESSION_IDLE_TTL_SECONDS`**.
+- **`UnauthorizedInterceptor`:** **401** on protected API calls clears auth and navigates to **`/login`** (with `session=expired` query param). **401** on login/register/bootstrap/token and on the initial **`GET /api/v1/auth/csrf`** probe is ignored.
 
 ## Related
 
-- [README.md](README.md) — documentation index.
+- [platform-control-plane.md](platform-control-plane.md) — RBAC matrix, route ↔ permission.
+- [openapi.yaml](openapi.yaml) — contract.
