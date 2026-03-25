@@ -1,5 +1,12 @@
 // smoketest runs HTTP smoke checks against a running platform API (same scenarios as legacy scripts/test.ps1).
 // Session flow also covers refresh, join-token, desktop PKCE exchange, and change-password (see session_extras.go).
+//
+// Each run uses a unique suffix (nanosecond) on user names and emails so repeated runs against a shared DB
+// do not collide on fixed strings like "SmokeAlice", and so list/search assertions are not confused by leftovers.
+// The machine-created user (M2M) is deleted during the flow; the single registered human account is deleted
+// at the end after logout + re-login, so smoke does not leave standing registered users when the run succeeds.
+//
+// By default only loopback hosts are allowed for -base (see SMOKETEST_ALLOW_HOSTS in allowlist.go).
 package main
 
 import (
@@ -17,8 +24,13 @@ import (
 	"time"
 )
 
+const (
+	smokePasswordInitial = "smoke-pass-8ch"
+	smokePasswordChanged = "smoke-pass-9ch-xx"
+)
+
 func main() {
-	baseFlag := flag.String("base", "http://localhost:5000", "API base URL (no trailing slash)")
+	baseFlag := flag.String("base", "http://localhost:5000", "API base URL (no trailing slash); host must match SMOKETEST_ALLOW_HOSTS (default loopback only)")
 	clientID := flag.String("client-id", "dev-platform", "client_id for client_credentials")
 	clientSecret := flag.String("client-secret", "change-me-dev-secret-min-length-16", "client_secret for client_credentials")
 	flag.Parse()
@@ -29,8 +41,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "smoketest: invalid -base URL\n")
 		os.Exit(1)
 	}
+	mustHostAllowed(apiURL.Hostname())
 
-	fmt.Printf("Running smoke tests against %s\n", base)
+	runSuffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	smokeEmail := fmt.Sprintf("smoke+%s@example.com", runSuffix)
+	aliceName := fmt.Sprintf("SmokeAlice-%s", runSuffix)
+
+	fmt.Printf("Running smoke tests against %s (run suffix %s)\n", base, runSuffix)
 
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 
@@ -77,7 +94,7 @@ func main() {
 	must(tokenEnv.Data.TokenType == "Bearer", "token_type should be Bearer")
 	bearer := hdr("Authorization", "Bearer "+tokenEnv.Data.AccessToken)
 
-	newUser := map[string]any{"name": "SmokeAlice", "pennies": 77}
+	newUser := map[string]any{"name": aliceName, "pennies": 77}
 	nb, _ := json.Marshal(newUser)
 	code, createRaw, err := do(httpClient, http.MethodPost, join(base, "/api/v1/users"), bytes.NewReader(nb),
 		mergeHdr(bearer, hdr("Content-Type", "application/json")))
@@ -92,7 +109,7 @@ func main() {
 	}
 	must(json.Unmarshal(createRaw, &created) == nil, "create user JSON")
 	must(created.Data.ID > 0, "created user should include numeric id")
-	must(created.Data.Name == "SmokeAlice", "created user name mismatch")
+	must(created.Data.Name == aliceName, "created user name mismatch")
 	uid := created.Data.ID
 	putURL := join(base, "/api/v1/users/"+strconv.FormatInt(uid, 10))
 
@@ -108,14 +125,15 @@ func main() {
 	var searchEnv struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	searchURL := join(base, "/api/v1/users/search?name="+url.QueryEscape("SmokeAli"))
+	searchURL := join(base, "/api/v1/users/search?name="+url.QueryEscape(aliceName))
 	code, searchRaw, err := do(httpClient, http.MethodGet, searchURL, nil, bearer)
 	mustOK(err)
 	must(code == http.StatusOK, "search should return 200")
 	must(json.Unmarshal(searchRaw, &searchEnv) == nil, "search JSON")
 	must(len(searchEnv.Data) >= 1, "search should return created user")
 
-	update := map[string]any{"name": "SmokeAliceUpdated", "pennies": 99}
+	aliceUpdatedName := aliceName + "Updated"
+	update := map[string]any{"name": aliceUpdatedName, "pennies": 99}
 	ub, _ := json.Marshal(update)
 	code, _, err = do(httpClient, http.MethodPut, putURL, bytes.NewReader(ub),
 		mergeHdr(bearer, hdr("Content-Type", "application/json")))
@@ -126,28 +144,36 @@ func main() {
 	mustOK(err)
 	must(code == http.StatusForbidden, "DELETE /users/{id} with client_credentials token should return 403")
 
-	jar1, err := cookiejar.New(nil)
+	humanJar, err := cookiejar.New(nil)
 	mustOK(err)
-	client1 := &http.Client{Jar: jar1, Timeout: 60 * time.Second}
-	crudEmail := fmt.Sprintf("smokecrud+%d@example.com", time.Now().Unix())
-	reg1 := map[string]string{"email": crudEmail, "password": "smoke-pass-8ch", "name": "SmokeCrud"}
-	rb1, _ := json.Marshal(reg1)
-	code, _, err = do(client1, http.MethodPost, join(base, "/api/v1/auth/register"), bytes.NewReader(rb1),
+	humanClient := &http.Client{Jar: humanJar, Timeout: 60 * time.Second}
+	regBody := map[string]string{"email": smokeEmail, "password": smokePasswordInitial, "name": "SmokeRun"}
+	rb1, _ := json.Marshal(regBody)
+	code, regRaw, err := do(humanClient, http.MethodPost, join(base, "/api/v1/auth/register"), bytes.NewReader(rb1),
 		hdr("Content-Type", "application/json; charset=utf-8"))
 	mustOK(err)
-	must(code == http.StatusCreated, "crud register should return 201")
+	must(code == http.StatusCreated, "register should return 201")
+	var regEnv struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	must(json.Unmarshal(regRaw, &regEnv) == nil, "register JSON")
+	humanUserID := regEnv.Data.ID
+	must(humanUserID > 0, "register should return user id")
+	humanUserURL := join(base, "/api/v1/users/"+strconv.FormatInt(humanUserID, 10))
 
-	login1 := map[string]string{"email": crudEmail, "password": "smoke-pass-8ch"}
+	login1 := map[string]string{"email": smokeEmail, "password": smokePasswordInitial}
 	lb1, _ := json.Marshal(login1)
-	code, _, err = do(client1, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(lb1),
+	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(lb1),
 		hdr("Content-Type", "application/json; charset=utf-8"))
 	mustOK(err)
-	must(code == http.StatusOK, "crud login should return 200")
+	must(code == http.StatusOK, "login should return 200")
 
-	csrf1 := cookieValue(jar1, apiURL, "gl_csrf")
-	must(csrf1 != "", "crud login should set gl_csrf")
+	csrf1 := cookieValue(humanJar, apiURL, "gl_csrf")
+	must(csrf1 != "", "login should set gl_csrf")
 
-	code, putBody, err := do(client1, http.MethodPut, putURL, bytes.NewReader(ub),
+	code, putBody, err := do(humanClient, http.MethodPut, putURL, bytes.NewReader(ub),
 		mergeHdr(hdr("Content-Type", "application/json"), hdr("X-CSRF-Token", csrf1)))
 	mustOK(err)
 	must(code == http.StatusOK, "PUT with session should return 200")
@@ -158,10 +184,10 @@ func main() {
 		} `json:"data"`
 	}
 	must(json.Unmarshal(putBody, &updated) == nil, "PUT response JSON")
-	must(updated.Data.Name == "SmokeAliceUpdated", "update should change user name")
+	must(updated.Data.Name == aliceUpdatedName, "update should change user name")
 	must(updated.Data.Pennies == 99, "update should change pennies")
 
-	code, _, err = do(client1, http.MethodDelete, putURL, nil, hdr("X-CSRF-Token", csrf1))
+	code, _, err = do(humanClient, http.MethodDelete, putURL, nil, hdr("X-CSRF-Token", csrf1))
 	mustOK(err)
 	must(code == http.StatusNoContent, "DELETE should return 204 No Content")
 
@@ -169,32 +195,15 @@ func main() {
 	mustOK(err)
 	must(code == http.StatusNotFound, "deleted user should return 404 on fetch")
 
-	jar2, err := cookiejar.New(nil)
-	mustOK(err)
-	client2 := &http.Client{Jar: jar2, Timeout: 60 * time.Second}
-	sessEmail := fmt.Sprintf("smoke+%d@example.com", time.Now().Unix())
-	reg2 := map[string]string{"email": sessEmail, "password": "smoke-pass-8ch", "name": "SmokeSession"}
-	rb2, _ := json.Marshal(reg2)
-	code, _, err = do(client2, http.MethodPost, join(base, "/api/v1/auth/register"), bytes.NewReader(rb2),
-		hdr("Content-Type", "application/json; charset=utf-8"))
-	mustOK(err)
-	must(code == http.StatusCreated, "register should return 201")
-
-	login2 := map[string]string{"email": sessEmail, "password": "smoke-pass-8ch"}
-	lb2, _ := json.Marshal(login2)
-	code, _, err = do(client2, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(lb2),
-		hdr("Content-Type", "application/json; charset=utf-8"))
-	mustOK(err)
-	must(code == http.StatusOK, "login should return 200")
-	must(cookieValue(jar2, apiURL, "gl_session") != "", "login should set gl_session cookie")
-	must(cookieValue(jar2, apiURL, "gl_csrf") != "", "login should set gl_csrf cookie")
+	must(cookieValue(humanJar, apiURL, "gl_session") != "", "session cookie should exist before auth extras")
+	must(cookieValue(humanJar, apiURL, "gl_csrf") != "", "csrf cookie should exist before auth extras")
 
 	var csrfReady struct {
 		Data struct {
 			Ready bool `json:"csrf_ready"`
 		} `json:"data"`
 	}
-	code, raw, err := do(client2, http.MethodGet, join(base, "/api/v1/auth/csrf"), nil, nil)
+	code, raw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/auth/csrf"), nil, nil)
 	mustOK(err)
 	must(code == http.StatusOK, "GET /auth/csrf should return 200")
 	must(json.Unmarshal(raw, &csrfReady) == nil, "csrf JSON")
@@ -203,23 +212,40 @@ func main() {
 	var usersCookie struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	code, ucRaw, err := do(client2, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+	code, ucRaw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
 	mustOK(err)
 	must(code == http.StatusOK, "GET /users with session cookie should succeed")
 	must(json.Unmarshal(ucRaw, &usersCookie) == nil, "cookie users JSON")
 	must(len(usersCookie.Data) >= 1, "GET /users with session should return data")
 
-	runAuthSessionExtras(client2, jar2, base, apiURL, sessEmail, "smoke-pass-8ch", "smoke-pass-9ch-xx")
+	runAuthSessionExtras(humanClient, humanJar, base, apiURL, smokeEmail, smokePasswordInitial, smokePasswordChanged)
 
-	csrfOut := cookieValue(jar2, apiURL, "gl_csrf")
+	csrfOut := cookieValue(humanJar, apiURL, "gl_csrf")
 	must(csrfOut != "", "csrf cookie should exist before logout")
-	code, _, err = do(client2, http.MethodPost, join(base, "/api/v1/auth/logout"), nil, hdr("X-CSRF-Token", csrfOut))
+	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/logout"), nil, hdr("X-CSRF-Token", csrfOut))
 	mustOK(err)
 	must(code == http.StatusOK, "logout should return 200")
 
-	code, _, err = do(client2, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+	code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
 	mustOK(err)
 	must(code == http.StatusUnauthorized, "after logout, GET /users with cookie should return 401")
+
+	// Re-authenticate so we can delete the smoke account row (no orphan registered users on success).
+	relogin := map[string]string{"email": smokeEmail, "password": smokePasswordChanged}
+	reloginBody, _ := json.Marshal(relogin)
+	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(reloginBody),
+		hdr("Content-Type", "application/json; charset=utf-8"))
+	mustOK(err)
+	must(code == http.StatusOK, "re-login cleanup should return 200")
+	csrfDel := cookieValue(humanJar, apiURL, "gl_csrf")
+	must(csrfDel != "", "csrf should exist after re-login for cleanup delete")
+	code, _, err = do(humanClient, http.MethodDelete, humanUserURL, nil, hdr("X-CSRF-Token", csrfDel))
+	mustOK(err)
+	must(code == http.StatusNoContent, "cleanup DELETE smoke user should return 204")
+
+	code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+	mustOK(err)
+	must(code == http.StatusUnauthorized, "after deleting user, GET /users with cookie should return 401")
 
 	bootHdr := mergeHdr(hdr("Content-Type", "application/json"), hdr("Origin", "http://localhost:4200"))
 	code, bootRaw, err := do(httpClient, http.MethodPost, join(base, "/api/v1/auth/bootstrap"), strings.NewReader("{}"), bootHdr)
