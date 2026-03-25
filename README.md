@@ -1,8 +1,10 @@
 # go-lab
 
-Go API, Angular SPA, MySQL 8.4, golang-migrate, Docker Compose. Code: [`go_CRUD_api/`](go_CRUD_api/), [`client/`](client/), [`migrations/`](migrations/).
+**Marble / TaskStack suite — platform service:** HTTP JSON API, Angular admin SPA, MySQL schema (migrations only), Docker Compose. Application code: [`api/`](api/) (Go module `github.com/codemarked/go-lab/api`), [`client/`](client/), [`migrations/`](migrations/). Planning and integrator docs: [`docs/README.md`](docs/README.md).
 
-**Need:** Docker + Compose + Git. **Go 1.24+** only for local `go test` / `go run` (CI and the backend image match `go_CRUD_api/go.mod`).
+**Defaults:** Local and example configuration use the logical MySQL database name `suite_platform` and HS256 JWT issuer/audience `suite-platform` / `suite-platform-api` (see [`.env.example`](.env.example)). Override in production as needed. If you have an existing database named `todosdb` or old JWT claims, set `DB_NAME` / `JWT_*` explicitly when migrating.
+
+**Need:** Docker + Compose + Git. **Go 1.24+** only for local `go test` / `go run` (CI and the backend image match `api/go.mod`).
 
 ## First-time setup
 
@@ -36,6 +38,9 @@ Full list: [`.env.example`](.env.example). Common:
 |-----|------|
 | `DB_*` | DSN uses `parseTime=true` — required for sessions |
 | `JWT_SECRET` | ≥32 chars prod; optional `JWT_SECRET_PREVIOUS` — [jwt-rotation.md](docs/jwt-rotation.md) |
+| `JOIN_TOKEN_TTL_SECONDS` | TTL for end-user Marble join handoff tokens (`/api/v1/auth/join-token`) |
+| `DESKTOP_EXCHANGE_CODE_TTL_SECONDS` | TTL for one-time desktop exchange codes (`/api/v1/auth/desktop/start`) |
+| `DESKTOP_EXCHANGE_CALLBACK_HOSTS` | Comma-separated callback host allowlist for desktop exchange start validation |
 | `SESSION_*` | HttpOnly session cookie; **`SESSION_COOKIE_SECURE=false`** on plain HTTP (see `.env.example` and Compose) or browsers drop cookies → 401 |
 | `CSRF_*` | Double-submit for cookie mutations — [auth-session.md](docs/auth-session.md) |
 | `PLATFORM_CLIENT_*` | `/auth/token` + bootstrap |
@@ -49,19 +54,22 @@ Full list: [`.env.example`](.env.example). Common:
 | Area | Endpoints |
 |------|-----------|
 | Health | `GET /healthz`, `GET /readyz` |
-| Auth | `POST .../auth/register`, `login`, `logout`, `refresh` (cookie session) |
+| Auth | `POST .../auth/register`, `login`, `logout`, `refresh` (cookie session), `change-password`, `join-token` (human user only), desktop bridge: `desktop/start` + `desktop/exchange` (PKCE challenge/verifier) |
 | Service | `POST .../auth/token`, `.../auth/bootstrap` (temporary bridge) |
-| Users | CRUD + `/users/search` — **session cookie or Bearer JWT** |
+| Users | List/create/search + get by id — **session cookie or Bearer** (`client_credentials` OK). **`PUT`/`DELETE` by id** require **human** auth (`user:` subject); M2M Bearer → **403** — [openapi.yaml](docs/openapi.yaml) |
 
 Responses: `{ data, meta }` or `{ error, meta }`. Old `/api/...` outside v1 → **410**. SPA config: [`client/src/environments/environment.ts`](client/src/environments/environment.ts).
 
-**Docs:** [docs/README.md](docs/README.md) · **Roadmap / suite:** [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)
+**Docs:** [docs/README.md](docs/README.md) · **OpenAPI:** [docs/openapi.yaml](docs/openapi.yaml) · **Roadmap / suite:** [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)
 
 ## Tests and CI
 
-- `cd go_CRUD_api && go test ./...`
-- Smoke: `./scripts/test.ps1` (stack up) · `./scripts/migrate.ps1`
-- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — tests + Compose smoke; cache via [`docker-compose.ci.yml`](docker-compose.ci.yml)
+- Fast local checks (same as CI **job 1** — tests + OpenAPI): `./scripts/ci-local.ps1` or `bash scripts/ci-local.sh`
+- Full local CI (**both** jobs, ends with `docker compose down -v`): `./scripts/ci-full.ps1` or `bash scripts/ci-full.sh` (`pwsh` required for smoke on Unix)
+- Details: [docs/ci.md](docs/ci.md) · [scripts/README.md](scripts/README.md)
+- Unit tests only (from repo root): `go test -C api ./...`
+- Smoke: `go run -C api ./cmd/smoketest` or `./scripts/test.ps1` (Compose stack running) · `./scripts/migrate.ps1` or `bash scripts/migrate.sh`
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — tests + OpenAPI + Compose smoke; cache via [`docker-compose.ci.yml`](docker-compose.ci.yml)
 
 ## Production
 

@@ -22,12 +22,20 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go_CRUD_api/go.mod
-          cache-dependency-path: go_CRUD_api/go.sum
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
 
-      - name: Run backend tests
-        working-directory: go_CRUD_api
+      - name: Go unit tests
+        working-directory: api
         run: go test ./...
+
+      - name: Govulncheck
+        working-directory: api
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+      - name: Validate OpenAPI spec (Go)
+        working-directory: api
+        run: go run ./cmd/openapivalidate -spec ../docs/openapi.yaml
 
   compose-smoke:
     runs-on: ubuntu-latest
@@ -38,6 +46,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go (schema golden tool)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -73,9 +87,11 @@ jobs:
           echo "Backend readiness check timed out"
           exit 1
 
-      - name: Run smoke tests
-        shell: pwsh
-        run: ./scripts/test.ps1
+      - name: Verify migration schema golden
+        run: go run -C api ./cmd/schemagolden
+
+      - name: Run smoke tests (Go)
+        run: go run -C api ./cmd/smoketest -- -base http://localhost:5000
 
       - name: Dump logs on failure
         if: failure()

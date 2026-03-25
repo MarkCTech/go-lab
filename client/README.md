@@ -1,8 +1,8 @@
 # Client (Angular)
 
-Platform admin SPA for this repo’s API: register/sign-in, cookie sessions + CSRF, user CRUD.
+Angular admin SPA for the platform API: registration and sign-in, HttpOnly cookie sessions with CSRF protection, and user management.
 
-- **Run:** `ng serve` → [http://localhost:4200](http://localhost:4200) (proxies `/api` via [`proxy.conf.json`](proxy.conf.json); see repo [README](../README.md) § Platform admin).
+- **Run:** `ng serve` → [http://localhost:4200](http://localhost:4200) (proxies `/api` via [`proxy.conf.json`](proxy.conf.json); see repository [README](../README.md), Admin SPA section).
 - **Scope and session behavior:** [docs/platform-admin-ui.md](../docs/platform-admin-ui.md)
 - **All docs:** [docs/README.md](../docs/README.md)
 
