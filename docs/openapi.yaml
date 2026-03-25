@@ -1,0 +1,958 @@
+openapi: 3.0.3
+info:
+  title: Platform API (Marble / TaskStack suite)
+  description: |
+    HTTP JSON API under `/api/v1` for the Marble / TaskStack suite platform service (implemented in this repository's `api` Go module).
+    Success bodies use `{ "data": ..., "meta": { "request_id": "..." } }`.
+    Errors use `{ "error": { "code", "message", "details?" }, "meta": { "request_id" } }`.
+
+    **Authentication**
+    - **Bearer**: HS256 platform JWT (`POST /auth/token` client_credentials) or OIDC access token when `OIDC_*` is configured.
+    - **Session cookie**: HttpOnly session from `POST /auth/login`. Mutating requests with cookies must send the CSRF header (`X-CSRF-Token` by default) matching the non-HttpOnly CSRF cookie. Bearer-authenticated mutating requests skip CSRF.
+
+    **Human-only operations**: `PUT` and `DELETE` on `/users/{id}` require an authenticated **end-user** subject (`user:<id>` from session or user-scoped Bearer). Subjects `client:*` (machine / client_credentials) receive 403.
+  version: 0.1.0
+
+servers:
+  - url: /
+    description: API root (same host as backend; admin SPA may proxy `/api`).
+
+tags:
+  - name: health
+  - name: auth
+  - name: users
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness (DB ping + migration version when configured)
+      operationId: readyz
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyOK"
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyNotOK"
+
+  /api/v1/auth/register:
+    post:
+      tags: [auth]
+      summary: Register email/password user
+      operationId: authRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeRegisterResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          $ref: "#/components/responses/ConflictError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Login (sets session + CSRF cookies)
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeLoginResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/RateLimitedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout (revokes session; CSRF required when session cookie present)
+      operationId: authLogout
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeLogoutResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh session sliding window (CSRF required when using cookies)
+      operationId: authRefresh
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeRefreshResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/csrf:
+    get:
+      tags: [auth]
+      summary: Rotate CSRF cookie for an existing session
+      operationId: authCsrf
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: CSRF cookie set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeCsrfResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change password (end-user only; revokes sessions)
+      operationId: authChangePassword
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeChangePasswordResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/join-token:
+    post:
+      tags: [auth]
+      summary: Issue short-lived join token for Marble handoff (end-user only)
+      operationId: authJoinToken
+      x-requiresHumanSubject: true
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinTokenRequest"
+      responses:
+        "200":
+          description: Join token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeJoinTokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/desktop/start:
+    post:
+      tags: [auth]
+      summary: Start desktop login handoff (issue one-time exchange code; end-user only)
+      operationId: authDesktopStart
+      x-requiresHumanSubject: true
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DesktopStartRequest"
+      responses:
+        "200":
+          description: One-time exchange code issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeDesktopStartResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/desktop/exchange:
+    post:
+      tags: [auth]
+      summary: Exchange one-time desktop code for user Bearer token
+      operationId: authDesktopExchange
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DesktopExchangeRequest"
+      responses:
+        "200":
+          description: Desktop access token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeDesktopExchangeResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/token:
+    post:
+      tags: [auth]
+      summary: Issue HS256 Bearer (client_credentials)
+      operationId: authToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeTokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/bootstrap:
+    post:
+      tags: [auth]
+      summary: Temporary SPA bridge token (Origin allowlist; may be disabled)
+      operationId: authBootstrap
+      security: []
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeBootstrapTokenResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List users
+      operationId: usersList
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeUserList"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [users]
+      summary: Create user
+      operationId: usersCreate
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserWriteRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeUser"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/users/search:
+    get:
+      tags: [users]
+      summary: Search users by name substring
+      operationId: usersSearch
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK (empty when name blank)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeUserList"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/users/{id}:
+    get:
+      tags: [users]
+      summary: Get user by id
+      operationId: usersGetById
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeUser"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [users]
+      summary: Update user (human subject only; not client_credentials)
+      operationId: usersUpdate
+      x-requiresHumanSubject: true
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserWriteRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeUser"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [users]
+      summary: Delete user (human subject only; not client_credentials)
+      operationId: usersDelete
+      x-requiresHumanSubject: true
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204":
+          description: No content
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 platform access token or OIDC access token (when configured).
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: gl_session
+      description: Session cookie from login; pair with CSRF cookie + header on unsafe methods.
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    ValidationError:
+      description: Bad request / validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: invalid request body
+              details:
+                field: body
+            meta:
+              request_id: ""
+    UnauthorizedError:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ForbiddenError:
+      description: Forbidden (CSRF, bootstrap disabled, or human-only route with client token)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFoundError:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ConflictError:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    RateLimitedError:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    Meta:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+
+    ErrorEnvelope:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - NOT_FOUND
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - CONFLICT
+                - INTERNAL_ERROR
+                - NOT_IMPLEMENTED
+                - RATE_LIMITED
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    ReadyOK:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ready
+        request_id:
+          type: string
+
+    ReadyNotOK:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: not_ready
+        reason:
+          type: string
+        request_id:
+          type: string
+        error:
+          type: string
+        version:
+          type: integer
+        expected_min:
+          type: integer
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    TokenRequest:
+      type: object
+      required: [grant_type, client_id, client_secret]
+      properties:
+        grant_type:
+          type: string
+          enum: [client_credentials]
+        client_id:
+          type: string
+        client_secret:
+          type: string
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
+
+    JoinTokenRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          minLength: 3
+          maxLength: 128
+
+    DesktopStartRequest:
+      type: object
+      required: [session_id, code_challenge]
+      properties:
+        session_id:
+          type: string
+          minLength: 3
+          maxLength: 128
+        code_challenge:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: PKCE S256 code challenge (base64url, no padding).
+        callback_uri:
+          type: string
+          description: Optional callback URL. Must be `http` loopback with host in `DESKTOP_EXCHANGE_CALLBACK_HOSTS`; no URL userinfo or fragment.
+
+    DesktopExchangeRequest:
+      type: object
+      required: [exchange_code, code_verifier]
+      properties:
+        exchange_code:
+          type: string
+          minLength: 64
+          maxLength: 64
+          description: One-time exchange code (hex).
+        code_verifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+          description: PKCE verifier paired with `code_challenge`.
+
+    UserWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        pennies:
+          type: integer
+          minimum: 0
+
+    User:
+      type: object
+      required: [id, name, pennies]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        pennies:
+          type: integer
+
+    EnvelopeRegisterResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [id, email, name]
+          properties:
+            id:
+              type: integer
+            email:
+              type: string
+            name:
+              type: string
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeLoginResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [user_id, email]
+          properties:
+            user_id:
+              type: integer
+            email:
+              type: string
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeLogoutResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [logged_out]
+          properties:
+            logged_out:
+              type: boolean
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeRefreshResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [refreshed, user_id]
+          properties:
+            refreshed:
+              type: boolean
+            user_id:
+              type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeCsrfResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [csrf_ready]
+          properties:
+            csrf_ready:
+              type: boolean
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeChangePasswordResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [password_changed, relogin_required]
+          properties:
+            password_changed:
+              type: boolean
+            relogin_required:
+              type: boolean
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeTokenResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [access_token, token_type, expires_in]
+          properties:
+            access_token:
+              type: string
+            token_type:
+              type: string
+              example: Bearer
+            expires_in:
+              type: integer
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeJoinTokenResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [join_token, token_type, expires_in, session_id]
+          properties:
+            join_token:
+              type: string
+            token_type:
+              type: string
+              example: Bearer
+            expires_in:
+              type: integer
+            session_id:
+              type: string
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeDesktopStartResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [exchange_code, expires_in, session_id, pkce_method]
+          properties:
+            exchange_code:
+              type: string
+            expires_in:
+              type: integer
+            session_id:
+              type: string
+            callback_uri:
+              type: string
+            pkce_method:
+              type: string
+              example: S256
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeDesktopExchangeResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [access_token, token_type, expires_in, session_id, token_use]
+          properties:
+            access_token:
+              type: string
+            token_type:
+              type: string
+              example: Bearer
+            expires_in:
+              type: integer
+            session_id:
+              type: string
+            token_use:
+              type: string
+              example: desktop_access
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeBootstrapTokenResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [access_token, token_type, expires_in, bootstrap]
+          properties:
+            access_token:
+              type: string
+            token_type:
+              type: string
+            expires_in:
+              type: integer
+            bootstrap:
+              type: object
+              additionalProperties: true
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeUser:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/User"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EnvelopeUserList:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        meta:
+          $ref: "#/components/schemas/Meta"

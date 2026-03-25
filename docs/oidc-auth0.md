@@ -36,7 +36,7 @@ Prefer a dedicated flow or `user_identities` rows over duplicate `users` rows. F
 - **Human** OIDC users resolve to **`user:<local_id>`** for handlers that expect end-user subjects (e.g. change-password).
 - **Auth0 client-credentials** access tokens typically use `sub` like **`{clientId}@clients`**. The API maps these to **`client:<clientId>`** so they align with the existing **`client:`** convention from HS256 `POST /auth/token` and are **not** inserted into `users`.
 
-**Caution:** Today, **`BearerOrSession` only proves authentication**; several `/users` routes do not yet enforce “human only.” Tighten route policies when TaskStack/Marble integration requires it.
+**Human-only routes:** **`PUT` and `DELETE` `/api/v1/users/:id`** require an authenticated **`user:`** subject (session or user-scoped Bearer). **`client:*`** (HS256 `POST /auth/token` or Auth0 client-credentials mapped to `client:<id>`) receives **403** on those operations — see [openapi.yaml](openapi.yaml) (`x-requiresHumanSubject`). Other routes may still accept any authenticated subject until you add **scopes** or additional guards for TaskStack/Marble.
 
 ## Refresh tokens
 
