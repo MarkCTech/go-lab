@@ -3,7 +3,6 @@ package myhandlers
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,9 +30,9 @@ func testAuthConfig() *config.Config {
 	}
 }
 
-func TestRegisterUserSuccess(t *testing.T) {
+func TestRegisterUserDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db, mock, err := sqlmock.New()
+	db, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +40,6 @@ func TestRegisterUserSuccess(t *testing.T) {
 	Database = &DBConn{Db: db}
 	AuthStore = authstore.New(db, 30*time.Minute, 24*time.Hour)
 	cfg := testAuthConfig()
-
-	mock.ExpectExec(`INSERT INTO users \(name, email, password_hash, pennies\) VALUES \(\?, \?, \?, 0\)`).
-		WithArgs("Reg User", "reg@example.com", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(101, 1))
-	mock.ExpectExec(`INSERT INTO auth_audit_events`).
-		WithArgs("auth_register_success", 101, sqlmock.AnyArg(), sqlmock.AnyArg(), "reg@example.com", nil).
-		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	r := gin.New()
 	r.Use(requestid.Middleware())
@@ -59,23 +51,8 @@ func TestRegisterUserSuccess(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusCreated {
+	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status %d body=%s", rr.Code, rr.Body.String())
-	}
-	var env struct {
-		Data struct {
-			ID    int64  `json:"id"`
-			Email string `json:"email"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-		t.Fatal(err)
-	}
-	if env.Data.ID != 101 || env.Data.Email != "reg@example.com" {
-		t.Fatalf("unexpected data: %+v", env.Data)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -95,7 +72,7 @@ func TestLoginSetsSessionAndUsersAcceptsCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(`SELECT id, password_hash FROM users WHERE email = \?`).
+	mock.ExpectQuery(`SELECT oa\.linked_user_id, oa\.password_hash\s+FROM operator_accounts oa\s+INNER JOIN users u ON u\.id = oa\.linked_user_id\s+WHERE oa\.email = \?\s+AND oa\.status = 'active'\s+AND u\.deleted_at IS NULL`).
 		WithArgs("login@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(7, hash))
 
@@ -134,7 +111,7 @@ func TestLoginSetsSessionAndUsersAcceptsCookie(t *testing.T) {
 	hashTok := authstore.HashOpaqueToken(sessionRaw)
 	abs := time.Now().UTC().Add(24 * time.Hour)
 	slide := time.Now().UTC().Add(29 * time.Minute)
-	mock.ExpectQuery(`SELECT id, user_id, expires_at, absolute_expires_at, revoked_at FROM auth_sessions WHERE token_hash = \?`).
+	mock.ExpectQuery(`SELECT id, user_id, expires_at, absolute_expires_at, revoked_at\s+FROM auth_sessions\s+WHERE token_hash = \?\s+AND user_id IN \(SELECT id FROM users WHERE deleted_at IS NULL\)`).
 		WithArgs(hashTok).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "expires_at", "absolute_expires_at", "revoked_at"}).
 			AddRow(int64(1), 7, slide, abs, nil))
@@ -142,7 +119,7 @@ func TestLoginSetsSessionAndUsersAcceptsCookie(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), int64(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	mock.ExpectQuery(`SELECT id, name, pennies FROM users ORDER BY pennies DESC, id ASC`).
+	mock.ExpectQuery(`SELECT id, name, pennies FROM users WHERE deleted_at IS NULL ORDER BY pennies DESC, id ASC`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "pennies"}).AddRow(7, "U", 0))
 
 	ts, err := auth.NewTokenService(testJWTSecret, "", "suite-platform", "suite-platform-api", time.Hour)
@@ -254,9 +231,9 @@ func TestRegisterInvalidJSONBody(t *testing.T) {
 
 	r := gin.New()
 	r.Use(requestid.Middleware())
-	r.POST("/api/v1/auth/register", RegisterUser(cfg))
+	r.POST("/api/v1/auth/invite/accept", AcceptOperatorInvite(cfg))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBufferString(`not-json`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/invite/accept", bytes.NewBufferString(`not-json`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -276,7 +253,7 @@ func TestLoginUnknownUser(t *testing.T) {
 	AuthStore = authstore.New(db, 30*time.Minute, 24*time.Hour)
 	cfg := testAuthConfig()
 
-	mock.ExpectQuery(`SELECT id, password_hash FROM users WHERE email = \?`).
+	mock.ExpectQuery(`SELECT oa\.linked_user_id, oa\.password_hash\s+FROM operator_accounts oa\s+INNER JOIN users u ON u\.id = oa\.linked_user_id\s+WHERE oa\.email = \?\s+AND oa\.status = 'active'\s+AND u\.deleted_at IS NULL`).
 		WithArgs("nope@example.com").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(`INSERT INTO auth_audit_events \(event_type, user_id, ip, user_agent, subject_hint, meta_json\)`).
@@ -315,7 +292,7 @@ func TestLoginWrongPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(`SELECT id, password_hash FROM users WHERE email = \?`).
+	mock.ExpectQuery(`SELECT oa\.linked_user_id, oa\.password_hash\s+FROM operator_accounts oa\s+INNER JOIN users u ON u\.id = oa\.linked_user_id\s+WHERE oa\.email = \?\s+AND oa\.status = 'active'\s+AND u\.deleted_at IS NULL`).
 		WithArgs("u@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(1, hash))
 	mock.ExpectExec(`INSERT INTO auth_audit_events \(event_type, user_id, ip, user_agent, subject_hint, meta_json\)`).

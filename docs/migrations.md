@@ -32,6 +32,8 @@ Or:
 - `000006_*`: `economy_ledger_events` — append-only operator ledger read model; `GET /api/v1/economy/ledger` ([platform-control-plane.md](platform-control-plane.md)).
 - `000007_*`: `backup_restore_requests` — restore **governance** (two-approver workflow); `GET/POST /api/v1/backups/*` and Angular DataOps. Physical backups/restores remain operator-run out of band ([platform-control-plane.md](platform-control-plane.md), [split-host-operations.md](split-host-operations.md), [openapi.yaml](openapi.yaml)).
 - `000008_*`: `operator_cases`, `operator_case_notes`, `operator_case_actions` — operator case workflows; seed role `gm_liveops`. Routes under `/api/v1/cases/*` ([platform-control-plane.md](platform-control-plane.md), [openapi.yaml](openapi.yaml)).
+- `000009_*`: operator identity model — `operator_accounts`, `operator_account_roles`, `operator_invites`, plus backfill from legacy role rows where available.
+- `000010_*`: user soft delete support — `users.deleted_at` + index.
 
 ## Readiness check (`/readyz`)
 
@@ -39,7 +41,7 @@ Or:
 
 **Migration version / dirty flag:** checked **only when** `MIGRATION_EXPECTED_VERSION` is set to a **positive** integer in `.env` (see [`api/config/config.go`](../api/config/config.go)). Then `/readyz` requires `schema_migrations` **not dirty** and `version >= MIGRATION_EXPECTED_VERSION`. If unset or zero, `/readyz` does **not** read `schema_migrations`.
 
-Set `MIGRATION_EXPECTED_VERSION` to the numeric prefix of the newest applied migration (e.g. `8` after `000008_*`).
+Set `MIGRATION_EXPECTED_VERSION` to the numeric prefix of the newest applied migration (for this branch, `10` after `000010_*`).
 
 If your DB version drifts from this branch’s migration chain, align it (backup, `migrate` up/down, or restore) before rollout.
 

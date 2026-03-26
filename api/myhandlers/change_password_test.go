@@ -30,10 +30,10 @@ func TestChangePasswordWithBearerRevokesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(`SELECT password_hash FROM users WHERE id = \?`).
+	mock.ExpectQuery(`SELECT password_hash\s+FROM operator_accounts oa\s+INNER JOIN users u ON u\.id = oa\.linked_user_id\s+WHERE oa\.linked_user_id = \?\s+AND oa\.status = 'active'\s+AND u\.deleted_at IS NULL`).
 		WithArgs(42).
 		WillReturnRows(sqlmock.NewRows([]string{"password_hash"}).AddRow(oldHash))
-	mock.ExpectExec(`UPDATE users SET password_hash = \? WHERE id = \?`).
+	mock.ExpectExec(`UPDATE operator_accounts oa\s+INNER JOIN users u ON u\.id = oa\.linked_user_id\s+SET oa\.password_hash = \?\s+WHERE oa\.linked_user_id = \? AND u\.deleted_at IS NULL`).
 		WithArgs(sqlmock.AnyArg(), 42).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE auth_sessions SET revoked_at = UTC_TIMESTAMP\(\) WHERE user_id = \? AND revoked_at IS NULL`).

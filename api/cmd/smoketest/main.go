@@ -152,115 +152,123 @@ func main() {
 	code, regRaw, err := do(humanClient, http.MethodPost, join(base, "/api/v1/auth/register"), bytes.NewReader(rb1),
 		hdr("Content-Type", "application/json; charset=utf-8"))
 	mustOK(err)
-	must(code == http.StatusCreated, "register should return 201")
-	var regEnv struct {
-		Data struct {
-			ID int64 `json:"id"`
-		} `json:"data"`
+	if code == http.StatusForbidden {
+		fmt.Println("Self-registration disabled; skipping human session/register smoke path.")
+	} else {
+		must(code == http.StatusCreated, "register should return 201 when self-registration is enabled")
+		var regEnv struct {
+			Data struct {
+				ID int64 `json:"id"`
+			} `json:"data"`
+		}
+		must(json.Unmarshal(regRaw, &regEnv) == nil, "register JSON")
+		humanUserID := regEnv.Data.ID
+		must(humanUserID > 0, "register should return user id")
+		humanUserURL := join(base, "/api/v1/users/"+strconv.FormatInt(humanUserID, 10))
+
+		login1 := map[string]string{"email": smokeEmail, "password": smokePasswordInitial}
+		lb1, _ := json.Marshal(login1)
+		code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(lb1),
+			hdr("Content-Type", "application/json; charset=utf-8"))
+		mustOK(err)
+		must(code == http.StatusOK, "login should return 200")
+
+		csrf1 := cookieValue(humanJar, apiURL, "gl_csrf")
+		must(csrf1 != "", "login should set gl_csrf")
+
+		code, putBody, err := do(humanClient, http.MethodPut, putURL, bytes.NewReader(ub),
+			mergeHdr(hdr("Content-Type", "application/json"), hdr("X-CSRF-Token", csrf1)))
+		mustOK(err)
+		must(code == http.StatusOK, "PUT with session should return 200")
+		var updated struct {
+			Data struct {
+				Name    string `json:"name"`
+				Pennies int    `json:"pennies"`
+			} `json:"data"`
+		}
+		must(json.Unmarshal(putBody, &updated) == nil, "PUT response JSON")
+		must(updated.Data.Name == aliceUpdatedName, "update should change user name")
+		must(updated.Data.Pennies == 99, "update should change pennies")
+
+		code, _, err = do(humanClient, http.MethodDelete, putURL, nil, hdr("X-CSRF-Token", csrf1))
+		mustOK(err)
+		must(code == http.StatusNoContent, "DELETE should return 204 No Content")
+
+		code, _, err = do(httpClient, http.MethodGet, putURL, nil, bearer)
+		mustOK(err)
+		must(code == http.StatusNotFound, "deleted user should return 404 on fetch")
+
+		must(cookieValue(humanJar, apiURL, "gl_session") != "", "session cookie should exist before auth extras")
+		must(cookieValue(humanJar, apiURL, "gl_csrf") != "", "csrf cookie should exist before auth extras")
+
+		var csrfReady struct {
+			Data struct {
+				Ready bool `json:"csrf_ready"`
+			} `json:"data"`
+		}
+		code, raw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/auth/csrf"), nil, nil)
+		mustOK(err)
+		must(code == http.StatusOK, "GET /auth/csrf should return 200")
+		must(json.Unmarshal(raw, &csrfReady) == nil, "csrf JSON")
+		must(csrfReady.Data.Ready, "GET /auth/csrf should report csrf_ready")
+
+		var usersCookie struct {
+			Data []json.RawMessage `json:"data"`
+		}
+		code, ucRaw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+		mustOK(err)
+		must(code == http.StatusOK, "GET /users with session cookie should succeed")
+		must(json.Unmarshal(ucRaw, &usersCookie) == nil, "cookie users JSON")
+		must(len(usersCookie.Data) >= 1, "GET /users with session should return data")
+
+		runAuthSessionExtras(humanClient, humanJar, base, apiURL, smokeEmail, smokePasswordInitial, smokePasswordChanged)
+
+		csrfOut := cookieValue(humanJar, apiURL, "gl_csrf")
+		must(csrfOut != "", "csrf cookie should exist before logout")
+		code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/logout"), nil, hdr("X-CSRF-Token", csrfOut))
+		mustOK(err)
+		must(code == http.StatusOK, "logout should return 200")
+
+		code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+		mustOK(err)
+		must(code == http.StatusUnauthorized, "after logout, GET /users with cookie should return 401")
+
+		// Re-authenticate so we can delete the smoke account row (no orphan registered users on success).
+		relogin := map[string]string{"email": smokeEmail, "password": smokePasswordChanged}
+		reloginBody, _ := json.Marshal(relogin)
+		code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(reloginBody),
+			hdr("Content-Type", "application/json; charset=utf-8"))
+		mustOK(err)
+		must(code == http.StatusOK, "re-login cleanup should return 200")
+		csrfDel := cookieValue(humanJar, apiURL, "gl_csrf")
+		must(csrfDel != "", "csrf should exist after re-login for cleanup delete")
+		code, _, err = do(humanClient, http.MethodDelete, humanUserURL, nil, hdr("X-CSRF-Token", csrfDel))
+		mustOK(err)
+		must(code == http.StatusNoContent, "cleanup DELETE smoke user should return 204")
+
+		code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
+		mustOK(err)
+		must(code == http.StatusUnauthorized, "after deleting user, GET /users with cookie should return 401")
 	}
-	must(json.Unmarshal(regRaw, &regEnv) == nil, "register JSON")
-	humanUserID := regEnv.Data.ID
-	must(humanUserID > 0, "register should return user id")
-	humanUserURL := join(base, "/api/v1/users/"+strconv.FormatInt(humanUserID, 10))
-
-	login1 := map[string]string{"email": smokeEmail, "password": smokePasswordInitial}
-	lb1, _ := json.Marshal(login1)
-	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(lb1),
-		hdr("Content-Type", "application/json; charset=utf-8"))
-	mustOK(err)
-	must(code == http.StatusOK, "login should return 200")
-
-	csrf1 := cookieValue(humanJar, apiURL, "gl_csrf")
-	must(csrf1 != "", "login should set gl_csrf")
-
-	code, putBody, err := do(humanClient, http.MethodPut, putURL, bytes.NewReader(ub),
-		mergeHdr(hdr("Content-Type", "application/json"), hdr("X-CSRF-Token", csrf1)))
-	mustOK(err)
-	must(code == http.StatusOK, "PUT with session should return 200")
-	var updated struct {
-		Data struct {
-			Name    string `json:"name"`
-			Pennies int    `json:"pennies"`
-		} `json:"data"`
-	}
-	must(json.Unmarshal(putBody, &updated) == nil, "PUT response JSON")
-	must(updated.Data.Name == aliceUpdatedName, "update should change user name")
-	must(updated.Data.Pennies == 99, "update should change pennies")
-
-	code, _, err = do(humanClient, http.MethodDelete, putURL, nil, hdr("X-CSRF-Token", csrf1))
-	mustOK(err)
-	must(code == http.StatusNoContent, "DELETE should return 204 No Content")
-
-	code, _, err = do(httpClient, http.MethodGet, putURL, nil, bearer)
-	mustOK(err)
-	must(code == http.StatusNotFound, "deleted user should return 404 on fetch")
-
-	must(cookieValue(humanJar, apiURL, "gl_session") != "", "session cookie should exist before auth extras")
-	must(cookieValue(humanJar, apiURL, "gl_csrf") != "", "csrf cookie should exist before auth extras")
-
-	var csrfReady struct {
-		Data struct {
-			Ready bool `json:"csrf_ready"`
-		} `json:"data"`
-	}
-	code, raw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/auth/csrf"), nil, nil)
-	mustOK(err)
-	must(code == http.StatusOK, "GET /auth/csrf should return 200")
-	must(json.Unmarshal(raw, &csrfReady) == nil, "csrf JSON")
-	must(csrfReady.Data.Ready, "GET /auth/csrf should report csrf_ready")
-
-	var usersCookie struct {
-		Data []json.RawMessage `json:"data"`
-	}
-	code, ucRaw, err := do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
-	mustOK(err)
-	must(code == http.StatusOK, "GET /users with session cookie should succeed")
-	must(json.Unmarshal(ucRaw, &usersCookie) == nil, "cookie users JSON")
-	must(len(usersCookie.Data) >= 1, "GET /users with session should return data")
-
-	runAuthSessionExtras(humanClient, humanJar, base, apiURL, smokeEmail, smokePasswordInitial, smokePasswordChanged)
-
-	csrfOut := cookieValue(humanJar, apiURL, "gl_csrf")
-	must(csrfOut != "", "csrf cookie should exist before logout")
-	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/logout"), nil, hdr("X-CSRF-Token", csrfOut))
-	mustOK(err)
-	must(code == http.StatusOK, "logout should return 200")
-
-	code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
-	mustOK(err)
-	must(code == http.StatusUnauthorized, "after logout, GET /users with cookie should return 401")
-
-	// Re-authenticate so we can delete the smoke account row (no orphan registered users on success).
-	relogin := map[string]string{"email": smokeEmail, "password": smokePasswordChanged}
-	reloginBody, _ := json.Marshal(relogin)
-	code, _, err = do(humanClient, http.MethodPost, join(base, "/api/v1/auth/login"), bytes.NewReader(reloginBody),
-		hdr("Content-Type", "application/json; charset=utf-8"))
-	mustOK(err)
-	must(code == http.StatusOK, "re-login cleanup should return 200")
-	csrfDel := cookieValue(humanJar, apiURL, "gl_csrf")
-	must(csrfDel != "", "csrf should exist after re-login for cleanup delete")
-	code, _, err = do(humanClient, http.MethodDelete, humanUserURL, nil, hdr("X-CSRF-Token", csrfDel))
-	mustOK(err)
-	must(code == http.StatusNoContent, "cleanup DELETE smoke user should return 204")
-
-	code, _, err = do(humanClient, http.MethodGet, join(base, "/api/v1/users"), nil, nil)
-	mustOK(err)
-	must(code == http.StatusUnauthorized, "after deleting user, GET /users with cookie should return 401")
 
 	bootHdr := mergeHdr(hdr("Content-Type", "application/json"), hdr("Origin", "http://localhost:4200"))
 	code, bootRaw, err := do(httpClient, http.MethodPost, join(base, "/api/v1/auth/bootstrap"), strings.NewReader("{}"), bootHdr)
 	mustOK(err)
-	must(code == http.StatusOK, "bootstrap should return 200")
-	var boot struct {
-		Data struct {
-			Bootstrap *struct {
-				Temporary bool `json:"temporary"`
-			} `json:"bootstrap"`
-		} `json:"data"`
+	must(code == http.StatusOK || code == http.StatusForbidden, "bootstrap should return 200 (enabled) or 403 (disabled)")
+	if code == http.StatusOK {
+		var boot struct {
+			Data struct {
+				Bootstrap *struct {
+					Temporary bool `json:"temporary"`
+				} `json:"bootstrap"`
+			} `json:"data"`
+		}
+		must(json.Unmarshal(bootRaw, &boot) == nil, "bootstrap JSON")
+		must(boot.Data.Bootstrap != nil, "bootstrap should include data.bootstrap deprecation object")
+		must(boot.Data.Bootstrap.Temporary, "bootstrap.temporary should be true")
+	} else {
+		fmt.Println("Bootstrap endpoint is disabled (expected in hardened deployments).")
 	}
-	must(json.Unmarshal(bootRaw, &boot) == nil, "bootstrap JSON")
-	must(boot.Data.Bootstrap != nil, "bootstrap should include data.bootstrap deprecation object")
-	must(boot.Data.Bootstrap.Temporary, "bootstrap.temporary should be true")
 
 	fmt.Println("Smoke tests passed.")
 }

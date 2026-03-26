@@ -15,6 +15,7 @@ const (
 	PermAuditWrite              = "audit.write"
 	PermSupportAck              = "platform.support.ack"
 	PermEconomyRead             = "economy.read"
+	PermUsersDelete             = "users.delete"
 	// Operator cases: player/character workflows (cases, sanctions, recovery, appeals).
 	PermCasesRead      = "cases.read"
 	PermCasesWrite     = "cases.write"
@@ -34,7 +35,7 @@ var rolePermissions = map[string][]string{
 		PermSecurityRead, PermSecurityWrite, PermAuditRead, PermAuditWrite,
 		PermPlayersRead, PermEconomyRead, PermBackupsRead,
 		PermBackupsRestoreApprove, PermBackupsRestoreFulfill,
-		PermCasesRead, PermSanctionsWrite, PermAppealsResolve,
+		PermCasesRead, PermSanctionsWrite, PermAppealsResolve, PermUsersDelete,
 	},
 	// GM / live-ops: full player-character workflow slice; grant via SQL after migration 000008.
 	"gm_liveops": {
