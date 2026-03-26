@@ -32,27 +32,36 @@ func NewFixedWindowLimiter(scope string, rpm int, message string) gin.HandlerFun
 	var mu sync.Mutex
 	byIP := make(map[string]*ipWindow)
 	const win = time.Minute
+	lastSweep := time.Now()
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		if rdb := redisx.Client; rdb != nil {
 			ok, rerr := fixedWindowRedisAllow(c.Request.Context(), rdb, scope, ip, rpm)
 			if rerr != nil {
-				slog.Warn("redis_rate_limit_failed_open", "scope", scope, "error", rerr.Error())
+				// Redis degradation should not disable protection entirely; fall back to in-process limiting.
+				slog.Warn("redis_rate_limit_fallback_local", "scope", scope, "error", rerr.Error())
+			} else {
+				if !ok {
+					respond.Error(c, http.StatusTooManyRequests, api.CodeRateLimited, message, nil)
+					c.Abort()
+					return
+				}
 				c.Next()
 				return
 			}
-			if !ok {
-				respond.Error(c, http.StatusTooManyRequests, api.CodeRateLimited, message, nil)
-				c.Abort()
-				return
-			}
-			c.Next()
-			return
 		}
 
 		now := time.Now()
 		mu.Lock()
+		if now.Sub(lastSweep) >= win {
+			for k, v := range byIP {
+				if now.Sub(v.windowStart) >= 10*win {
+					delete(byIP, k)
+				}
+			}
+			lastSweep = now
+		}
 		w, ok := byIP[ip]
 		if !ok {
 			w = &ipWindow{windowStart: now, count: 0}

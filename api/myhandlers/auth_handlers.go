@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -77,6 +78,18 @@ func IssueBootstrapToken(cfg *config.Config) gin.HandlerFunc {
 				"reason", "origin_not_allowed",
 			)
 			respond.Error(c, http.StatusForbidden, api.CodeForbidden, "origin not allowed", nil)
+			return
+		}
+		clientIPRaw := strings.TrimSpace(c.ClientIP())
+		if !clientIPAllowedForBootstrap(clientIPRaw, cfg.AuthBootstrapAllowedCIDRs) {
+			slog.Warn("auth_bootstrap_denied",
+				"request_id", requestid.FromContext(c),
+				"origin", origin,
+				"client_ip", clientIPRaw,
+				"allowed_cidrs", strings.Join(cfg.AuthBootstrapAllowedCIDRs, ","),
+				"reason", "client_ip_not_allowed",
+			)
+			respond.Error(c, http.StatusForbidden, api.CodeForbidden, "bootstrap client IP not allowed", nil)
 			return
 		}
 		slog.Info("auth_bootstrap_used",
@@ -366,6 +379,27 @@ func secureStringEq(a, b string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func clientIPAllowedForBootstrap(raw string, allowedCIDRs []string) bool {
+	ipText := strings.TrimSpace(raw)
+	if ipText == "" {
+		return false
+	}
+	addr, err := netip.ParseAddr(ipText)
+	if err != nil {
+		return false
+	}
+	for _, cidr := range allowedCIDRs {
+		pfx, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+		if err != nil {
+			continue
+		}
+		if pfx.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAllowedLoopbackCallbackURI(raw string, allowedHosts []string) bool {

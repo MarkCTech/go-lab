@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
 
 env:
@@ -11,6 +11,66 @@ env:
   COMPOSE_DOCKER_CLI_BUILD: 1
 
 jobs:
+  dependency-freshness:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Check frontend dependency freshness
+        working-directory: client
+        run: |
+          npm ci
+          node <<'NODE'
+          const { execSync } = require('node:child_process');
+          let output = '';
+          try {
+            output = execSync('npm outdated --json', {
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+          } catch (e) {
+            output = (e.stdout || '').toString();
+          }
+          const parsed = output.trim() ? JSON.parse(output) : {};
+          const behindWanted = Object.entries(parsed).filter(([, v]) => v.current !== v.wanted);
+          if (behindWanted.length > 0) {
+            console.error('Dependencies behind wanted versions (current != wanted):');
+            for (const [name, v] of behindWanted) {
+              console.error(`${name}: current=${v.current} wanted=${v.wanted} latest=${v.latest}`);
+            }
+            process.exit(1);
+          }
+          console.log('Frontend dependencies are up-to-date within declared semver ranges (current == wanted).');
+          NODE
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Check backend dependency freshness
+        working-directory: api
+        run: |
+          updates="$(go list -u -m -f '{{if and (not .Main) (not .Indirect) .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' all | sed '/^$/d')"
+          if [ -n "$updates" ]; then
+            echo "Outdated direct Go modules found:"
+            echo "$updates"
+            echo "Please update direct modules and commit go.mod/go.sum."
+            exit 1
+          fi
+          echo "Direct Go modules are up to date."
+
   backend-tests:
     runs-on: ubuntu-latest
     permissions:

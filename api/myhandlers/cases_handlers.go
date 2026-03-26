@@ -113,7 +113,7 @@ func PostOperatorCase(c *gin.Context) {
 	}
 	var subjectExists int
 	err := Database.Db.QueryRowContext(c.Request.Context(),
-		`SELECT id FROM users WHERE id = ?`, body.SubjectPlatformUserID).Scan(&subjectExists)
+		`SELECT id FROM users WHERE id = ? AND deleted_at IS NULL`, body.SubjectPlatformUserID).Scan(&subjectExists)
 	if errors.Is(err, sql.ErrNoRows) {
 		respond.Error(c, http.StatusBadRequest, api.CodeValidation, "subject_platform_user_id does not exist in users table", map[string]any{
 			"field": "subject_platform_user_id",
@@ -128,6 +128,10 @@ func PostOperatorCase(c *gin.Context) {
 	id, err := AuthStore.CreateOperatorCase(c.Request.Context(), body.SubjectPlatformUserID, body.SubjectCharacterRef,
 		strings.TrimSpace(body.Title), strings.TrimSpace(body.Description), priority, uid)
 	if err != nil {
+		if errors.Is(err, authstore.ErrInvalidCasePriority) {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, err.Error(), map[string]any{"field": "priority"})
+			return
+		}
 		respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "failed to create case", nil)
 		return
 	}
@@ -241,7 +245,7 @@ func PostOperatorCaseNote(c *gin.Context) {
 }
 
 type postSanctionBody struct {
-	SanctionType string `json:"sanction_type" binding:"required"`
+	SanctionType string  `json:"sanction_type" binding:"required"`
 	ExpiresAt    *string `json:"expires_at"` // RFC3339 optional
 }
 
@@ -271,7 +275,7 @@ func PostOperatorCaseSanction(c *gin.Context) {
 		return
 	}
 	payload := map[string]any{
-		"sanction_type":           strings.TrimSpace(body.SanctionType),
+		"sanction_type":            strings.TrimSpace(body.SanctionType),
 		"subject_platform_user_id": row.SubjectPlatformUserID,
 	}
 	if body.ExpiresAt != nil && strings.TrimSpace(*body.ExpiresAt) != "" {
@@ -453,11 +457,11 @@ func ListOperatorCaseActions(c *gin.Context) {
 	items := make([]gin.H, 0, len(actions))
 	for _, a := range actions {
 		hi := gin.H{
-			"id":             a.ID,
-			"case_id":        a.CaseID,
-			"created_at":     a.CreatedAt,
-			"action_kind":    a.ActionKind,
-			"actor_user_id":  a.ActorUserID,
+			"id":            a.ID,
+			"case_id":       a.CaseID,
+			"created_at":    a.CreatedAt,
+			"action_kind":   a.ActionKind,
+			"actor_user_id": a.ActorUserID,
 		}
 		if len(a.PayloadJSON) > 0 {
 			hi["payload"] = json.RawMessage(append([]byte(nil), a.PayloadJSON...))

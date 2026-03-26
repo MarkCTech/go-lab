@@ -71,7 +71,11 @@ func main() {
 		slog.Info("jwt_key_policy", "active_key_id", cfg.JWTActiveKeyID, "note", "placeholder_for_future_HS256_key_rotation")
 	}
 
-	r := setupRouter(cfg, oidcSvc)
+	r, err := setupRouter(cfg, oidcSvc)
+	if err != nil {
+		slog.Error("router_init_failed", "error", err)
+		os.Exit(1)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.APIPort,
@@ -103,8 +107,11 @@ func main() {
 	slog.Info("server_stopped")
 }
 
-func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
+func setupRouter(cfg *config.Config, oidc *auth.OIDC) (*gin.Engine, error) {
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		return nil, err
+	}
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 1 << 20 // 1 MiB
 
@@ -122,6 +129,8 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 	v1.Use(middleware.CSRFCookieProtect(cfg))
 	{
 		registerLim := middleware.NewFixedWindowLimiter("auth_register", 15, "too many registration attempts")
+		inviteAcceptLim := middleware.NewFixedWindowLimiter("auth_invite_accept", 20, "too many invite acceptance attempts")
+		inviteCreateLim := middleware.NewFixedWindowLimiter("auth_invite_create", 30, "too many invite creation attempts")
 		loginLim := middleware.NewFixedWindowLimiter("auth_login", 30, "too many login attempts")
 		logoutLim := middleware.NewFixedWindowLimiter("auth_logout", 60, "too many logout attempts")
 		refreshLim := middleware.NewFixedWindowLimiter("auth_refresh", 120, "too many session refresh attempts")
@@ -137,6 +146,7 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 		caseMutLim := middleware.NewFixedWindowLimiter("operator_cases_mut", 60, "too many case mutation requests")
 
 		v1.POST("/auth/register", registerLim, myhandlers.RegisterUser(cfg))
+		v1.POST("/auth/invite/accept", inviteAcceptLim, myhandlers.AcceptOperatorInvite(cfg))
 		v1.POST("/auth/login", loginLim, myhandlers.LoginUser(cfg))
 		v1.POST("/auth/logout", logoutLim, myhandlers.LogoutUser(cfg))
 		v1.POST("/auth/refresh", refreshLim, myhandlers.RefreshSession(cfg))
@@ -168,12 +178,20 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 		users.GET("/:id", myhandlers.GetUserByID)
 		users.POST("", myhandlers.CreateUser)
 		users.PUT("/:id", middleware.RequireHumanUser(), myhandlers.UpdateUser)
-		users.DELETE("/:id", middleware.RequireHumanUser(), myhandlers.DeleteUser)
+		users.DELETE("/:id",
+			middleware.RequireHumanUser(),
+			middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermUsersDelete),
+			middleware.RequirePlatformActionReason(10),
+			myhandlers.DeleteUser,
+		)
 
 		cp := v1.Group("")
 		cp.Use(middleware.BearerOrSession(myhandlers.TokenSvc, myhandlers.AuthStore, cfg.SessionCookieName, oidc))
 		cp.Use(middleware.RequireHumanUser())
 		{
+			cp.POST("/auth/invites", inviteCreateLim,
+				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermSecurityWrite),
+				myhandlers.CreateOperatorInvite(cfg))
 			cp.GET("/players",
 				middleware.RequirePlatformPermission(myhandlers.AuthStore, platformrbac.PermPlayersRead),
 				myhandlers.ListPlayersStub)
@@ -260,7 +278,7 @@ func setupRouter(cfg *config.Config, oidc *auth.OIDC) *gin.Engine {
 		}
 	}
 
-	return r
+	return r, nil
 }
 
 func isUnversionedLegacyAPIPath(p string) bool {

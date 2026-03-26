@@ -99,7 +99,9 @@ func (s *Store) ValidateSession(ctx context.Context, rawToken string) (userID in
 	var row SessionRow
 	err = s.db.QueryRowContext(ctx,
 		`SELECT id, user_id, expires_at, absolute_expires_at, revoked_at
-		 FROM auth_sessions WHERE token_hash = ?`,
+		 FROM auth_sessions
+		 WHERE token_hash = ?
+		   AND user_id IN (SELECT id FROM users WHERE deleted_at IS NULL)`,
 		hash,
 	).Scan(&row.ID, &row.UserID, &row.ExpiresAt, &row.AbsoluteExpiresAt, &row.RevokedAt)
 	if errors.Is(err, sql.ErrNoRows) {

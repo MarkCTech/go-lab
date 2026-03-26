@@ -12,7 +12,7 @@ info:
 
     **Human-only operations**: `PUT` and `DELETE` on `/users/{id}` require an authenticated **end-user** subject (`user:<id>` from session or user-scoped Bearer). Subjects `client:*` (machine / client_credentials) receive 403.
 
-    **Platform RBAC (players, characters, backups status, security, audit, support ack):** `GET /players`, `GET /characters`, `GET /backups/status`, `GET /security/me`, `GET /audit/admin-events`, and `POST /support/ack` require a **human** subject plus a **database** platform role (`user_platform_roles` → `platform_roles`; see `docs/platform-operator-roles.md`). Insufficient permissions return 403. `POST /support/ack` requires header **`X-Platform-Action-Reason`** (minimum length enforced server-side).
+    **Platform RBAC (players, characters, backups status, security, audit, support ack):** `GET /players`, `GET /characters`, `GET /backups/status`, `GET /security/me`, `GET /audit/admin-events`, and `POST /support/ack` require a **human** subject plus a **database** platform role (current model: `operator_accounts` + `operator_account_roles` + `platform_roles`; compatibility fallback may read legacy `user_platform_roles`). Insufficient permissions return 403. `POST /support/ack` requires header **`X-Platform-Action-Reason`** (minimum length enforced server-side).
 
     **Economy ledger (read-only):** `GET /economy/ledger` requires permission `economy.read` and a human subject. Query filters: `limit` (1–100, default 50), optional `before_id`, `platform_user_id`, `event_type`, `from`, `to` (RFC3339).
 
