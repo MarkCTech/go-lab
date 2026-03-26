@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ type Config struct {
 	JWTIssuer                    string
 	JWTAudience                  string
 	JWTAccessTTL                 time.Duration
+	OperatorInviteTTL            time.Duration
 	JoinTokenTTL                 time.Duration
 	DesktopExchangeCodeTTL       time.Duration
 	DesktopExchangeCallbackHosts []string
@@ -48,6 +50,8 @@ type Config struct {
 
 	// AuthBootstrapEnabled keeps POST /api/v1/auth/bootstrap available (temporary bridge).
 	AuthBootstrapEnabled bool
+	// AuthBootstrapAllowedCIDRs constrains source client IPs that may call bootstrap.
+	AuthBootstrapAllowedCIDRs []string
 
 	// JWTActiveKeyID is reserved for signing-key rotation telemetry (unused until multi-key JWTs land).
 	JWTActiveKeyID string
@@ -65,6 +69,10 @@ type Config struct {
 
 	// RedisURL: optional shared Redis for cross-replica rate limits and login lockout; empty keeps in-memory behavior.
 	RedisURL string
+
+	// TrustedProxies: Gin trusted proxies for ClientIP resolution.
+	// Empty means trust no proxies (safest default).
+	TrustedProxies []string
 }
 
 // Load reads and validates configuration from the environment.
@@ -119,7 +127,21 @@ func Load() (*Config, error) {
 		return nil, errors.New("SESSION_ABSOLUTE_TTL_SECONDS must be >= SESSION_IDLE_TTL_SECONDS")
 	}
 
-	c.AuthBootstrapEnabled = parseEnvBoolDefaultTrue("AUTH_BOOTSTRAP_ENABLED")
+	c.AuthBootstrapEnabled = parseEnvBoolDefaultFalse("AUTH_BOOTSTRAP_ENABLED")
+	bootstrapCIDRsRaw := strings.TrimSpace(envOrDefault("AUTH_BOOTSTRAP_ALLOWED_CIDRS", "127.0.0.1/32,::1/128"))
+	for _, p := range strings.Split(bootstrapCIDRsRaw, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(p); err != nil {
+			return nil, fmt.Errorf("AUTH_BOOTSTRAP_ALLOWED_CIDRS contains invalid CIDR %q", p)
+		}
+		c.AuthBootstrapAllowedCIDRs = append(c.AuthBootstrapAllowedCIDRs, p)
+	}
+	if len(c.AuthBootstrapAllowedCIDRs) == 0 {
+		return nil, errors.New("AUTH_BOOTSTRAP_ALLOWED_CIDRS must include at least one CIDR when bootstrap is in use")
+	}
 
 	if c.APIPort == "" {
 		c.APIPort = "5000"
@@ -143,6 +165,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("JWT_ACCESS_TTL_SECONDS must be between 60 and 86400, got %q", ttlStr)
 	}
 	c.JWTAccessTTL = time.Duration(ttlSec) * time.Second
+	inviteTTLStr := strings.TrimSpace(envOrDefault("OPERATOR_INVITE_TTL_SECONDS", "86400"))
+	inviteTTLSec, err := strconv.Atoi(inviteTTLStr)
+	if err != nil || inviteTTLSec < 300 || inviteTTLSec > 86400*30 {
+		return nil, fmt.Errorf("OPERATOR_INVITE_TTL_SECONDS must be between 300 and 2592000, got %q", inviteTTLStr)
+	}
+	c.OperatorInviteTTL = time.Duration(inviteTTLSec) * time.Second
 	joinTTLStr := strings.TrimSpace(envOrDefault("JOIN_TOKEN_TTL_SECONDS", "120"))
 	joinTTLSec, err := strconv.Atoi(joinTTLStr)
 	if err != nil || joinTTLSec < 30 || joinTTLSec > 1800 {
@@ -207,6 +235,15 @@ func Load() (*Config, error) {
 	c.OIDCIssuerURL = oidcIss
 	c.OIDCAudience = oidcAud
 	c.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
+	trustedProxiesRaw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if trustedProxiesRaw != "" {
+		for _, p := range strings.Split(trustedProxiesRaw, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				c.TrustedProxies = append(c.TrustedProxies, p)
+			}
+		}
+	}
 
 	return c, nil
 }
@@ -223,6 +260,16 @@ func parseEnvBoolDefaultTrue(key string) bool {
 	raw := os.Getenv(key)
 	if strings.TrimSpace(raw) == "" {
 		return true
+	}
+	v := strings.TrimSpace(strings.ToLower(raw))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// parseEnvBoolDefaultFalse returns false when unset; when set, only 1/true/yes (case-insensitive) are true.
+func parseEnvBoolDefaultFalse(key string) bool {
+	raw := os.Getenv(key)
+	if strings.TrimSpace(raw) == "" {
+		return false
 	}
 	v := strings.TrimSpace(strings.ToLower(raw))
 	return v == "1" || v == "true" || v == "yes"

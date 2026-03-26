@@ -109,7 +109,7 @@ func TestGetUsersReturnsUsers(t *testing.T) {
 		AddRow(1, "Alice", 55).
 		AddRow(2, "Bob", 10)
 
-	mock.ExpectQuery("SELECT id, name, pennies FROM users ORDER BY pennies DESC, id ASC").
+	mock.ExpectQuery("SELECT id, name, pennies FROM users WHERE deleted_at IS NULL ORDER BY pennies DESC, id ASC").
 		WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
@@ -202,7 +202,7 @@ func TestGetUserByIDNotFound(t *testing.T) {
 	router, mock, tok, cleanup := setupRouterWithMockDB(t)
 	defer cleanup()
 
-	mock.ExpectQuery("SELECT id, name, pennies FROM users WHERE id = \\?").
+	mock.ExpectQuery("SELECT id, name, pennies FROM users WHERE id = \\? AND deleted_at IS NULL").
 		WithArgs(999).
 		WillReturnError(sql.ErrNoRows)
 
@@ -226,9 +226,17 @@ func TestDeleteUserSuccess(t *testing.T) {
 
 	userTok := userBearerToken(t, TokenSvc, 1)
 
-	mock.ExpectExec("DELETE FROM users WHERE id = \\?").
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE users SET deleted_at = UTC_TIMESTAMP\\(\\) WHERE id = \\? AND deleted_at IS NULL").
 		WithArgs(7).
 		WillReturnResult(driver.RowsAffected(1))
+	mock.ExpectExec("UPDATE auth_sessions SET revoked_at = UTC_TIMESTAMP\\(\\) WHERE user_id = \\? AND revoked_at IS NULL").
+		WithArgs(7).
+		WillReturnResult(driver.RowsAffected(1))
+	mock.ExpectExec("UPDATE operator_accounts SET status = 'suspended' WHERE linked_user_id = \\?").
+		WithArgs(7).
+		WillReturnResult(driver.RowsAffected(1))
+	mock.ExpectCommit()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/7", nil)
 	req.Header = authHeader(userTok)
@@ -268,7 +276,7 @@ func TestUpdateUserSuccess(t *testing.T) {
 
 	userTok := userBearerToken(t, TokenSvc, 1)
 
-	mock.ExpectExec("UPDATE users SET name = \\?, pennies = \\? WHERE id = \\?").
+	mock.ExpectExec("UPDATE users SET name = \\?, pennies = \\? WHERE id = \\? AND deleted_at IS NULL").
 		WithArgs("Bob", 5, 3).
 		WillReturnResult(driver.RowsAffected(1))
 

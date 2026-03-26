@@ -15,10 +15,10 @@ import (
 	"github.com/codemarked/go-lab/api/auth"
 	"github.com/codemarked/go-lab/api/authstore"
 	"github.com/codemarked/go-lab/api/config"
+	"github.com/codemarked/go-lab/api/middleware"
 	"github.com/codemarked/go-lab/api/requestid"
 	"github.com/codemarked/go-lab/api/respond"
 	"github.com/gin-gonic/gin"
-	"github.com/go-sql-driver/mysql"
 )
 
 // AuthStore is set from main (session + user credential persistence).
@@ -26,14 +26,26 @@ var AuthStore *authstore.Store
 
 func RegisterUser(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if AuthStore == nil || Database == nil || Database.Db == nil {
+		respond.Error(c, http.StatusForbidden, api.CodeForbidden, "self-registration disabled; use invite acceptance flow", nil)
+	}
+}
+
+func CreateOperatorInvite(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if AuthStore == nil {
 			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "auth store not configured", nil)
 			return
 		}
+		inviterID, ok := middleware.AuthUserIDFromContext(c)
+		if !ok {
+			respond.Error(c, http.StatusForbidden, api.CodeForbidden, "signed-in operator required", nil)
+			return
+		}
 		var body struct {
-			Email    string `json:"email" binding:"required"`
-			Password string `json:"password" binding:"required"`
-			Name     string `json:"name" binding:"required,min=1,max=100"`
+			Email        string `json:"email" binding:"required"`
+			Name         string `json:"name" binding:"required,min=1,max=100"`
+			Role         string `json:"role" binding:"required,min=1,max=64"`
+			LinkedUserID *int   `json:"linked_user_id"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invalid request body", map[string]any{"field": "body"})
@@ -44,13 +56,80 @@ func RegisterUser(cfg *config.Config) gin.HandlerFunc {
 			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invalid email", map[string]any{"field": "email"})
 			return
 		}
+		name := strings.TrimSpace(body.Name)
+		if name == "" {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "name is required", map[string]any{"field": "name"})
+			return
+		}
+		roleName := strings.TrimSpace(body.Role)
+		if roleName == "" {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "role is required", map[string]any{"field": "role"})
+			return
+		}
+
+		rawToken, err := authstore.NewOpaqueToken()
+		if err != nil {
+			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "failed to create invite token", nil)
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		expiresAt := time.Now().UTC().Add(cfg.OperatorInviteTTL)
+		err = AuthStore.CreateOperatorInvite(
+			ctx,
+			authstore.HashOpaqueToken(rawToken),
+			email,
+			name,
+			roleName,
+			body.LinkedUserID,
+			&inviterID,
+			expiresAt,
+			nil,
+		)
+		if err != nil {
+			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "failed to create invite", nil)
+			return
+		}
+		meta, _ := json.Marshal(map[string]any{"role": roleName, "expires_at": expiresAt.UTC().Format(time.RFC3339)})
+		_ = AuthStore.InsertAudit(ctx, "auth_operator_invite_created", &inviterID, clientIP(c), c.Request.UserAgent(), email, meta)
+		respond.JSONOK(c, http.StatusCreated, gin.H{
+			"invite_token": rawToken,
+			"email":        email,
+			"role":         roleName,
+			"expires_at":   expiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+}
+
+func AcceptOperatorInvite(cfg *config.Config) gin.HandlerFunc {
+	_ = cfg
+	return func(c *gin.Context) {
+		if AuthStore == nil {
+			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "auth store not configured", nil)
+			return
+		}
+		var body struct {
+			InviteToken string `json:"invite_token" binding:"required"`
+			Email       string `json:"email" binding:"required"`
+			Password    string `json:"password" binding:"required"`
+			Name        string `json:"name"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invalid request body", map[string]any{"field": "body"})
+			return
+		}
 		if err := auth.ValidatePasswordLength(body.Password); err != nil {
 			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "password does not meet policy", map[string]any{"field": "password", "min_len": 8})
 			return
 		}
-		name := strings.TrimSpace(body.Name)
-		if name == "" {
-			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "name is required", map[string]any{"field": "name"})
+		inviteToken := strings.TrimSpace(body.InviteToken)
+		if inviteToken == "" {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invite_token is required", map[string]any{"field": "invite_token"})
+			return
+		}
+		email, err := normalizeEmail(body.Email)
+		if err != nil {
+			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invalid email", map[string]any{"field": "email"})
 			return
 		}
 		hash, err := auth.HashPassword(body.Password)
@@ -58,38 +137,35 @@ func RegisterUser(cfg *config.Config) gin.HandlerFunc {
 			respond.Error(c, http.StatusBadRequest, api.CodeValidation, "password does not meet policy", nil)
 			return
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 		defer cancel()
-		id, err := AuthStore.CreateRegisteredUser(ctx, email, name, hash)
+		res, err := AuthStore.AcceptOperatorInvite(
+			ctx,
+			authstore.HashOpaqueToken(inviteToken),
+			email,
+			hash,
+			strings.TrimSpace(body.Name),
+		)
 		if err != nil {
-			var me *mysql.MySQLError
-			if errors.As(err, &me) {
-				slog.Error("auth_register_db_error",
-					"request_id", requestid.FromContext(c),
-					"mysql_errno", me.Number,
-					"err", err.Error(),
-				)
-				if me.Number == 1062 {
-					respond.Error(c, http.StatusConflict, api.CodeConflict, "email already registered", map[string]any{"field": "email"})
-					return
-				}
-				// Unknown column / missing table: schema behind migrations (common if migrate never ran or /readyz check disabled).
-				if me.Number == 1054 || me.Number == 1146 {
-					respond.Error(c, http.StatusInternalServerError, api.CodeInternal,
-						"database schema is missing auth columns or tables; run migrations and set MIGRATION_EXPECTED_VERSION (see README)", nil)
-					return
-				}
-			} else {
-				slog.Error("auth_register_failed", "request_id", requestid.FromContext(c), "err", err.Error())
+			switch err {
+			case authstore.ErrOperatorInviteNotFound, authstore.ErrOperatorInviteExpired, authstore.ErrOperatorInviteUsed:
+				respond.Error(c, http.StatusUnauthorized, api.CodeUnauthorized, "invite is invalid or expired", nil)
+			case authstore.ErrOperatorInviteEmailMismatch:
+				respond.Error(c, http.StatusUnauthorized, api.CodeUnauthorized, "invite email does not match", nil)
+			case authstore.ErrOperatorRoleNotFound:
+				respond.Error(c, http.StatusBadRequest, api.CodeValidation, "invite role is invalid", nil)
+			case authstore.ErrOperatorEmailExists:
+				respond.Error(c, http.StatusConflict, api.CodeConflict, "an operator account already exists for this invite", nil)
+			default:
+				respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "failed to accept invite", nil)
 			}
-			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "failed to register user", nil)
 			return
 		}
-		_ = AuthStore.InsertAudit(ctx, "auth_register_success", intPtr(int(id)), clientIP(c), c.Request.UserAgent(), email, nil)
+		_ = AuthStore.InsertAudit(ctx, "auth_operator_invite_accepted", intPtr(res.LinkedUserID), clientIP(c), c.Request.UserAgent(), res.Email, nil)
 		respond.JSONOK(c, http.StatusCreated, gin.H{
-			"id":    id,
-			"email": email,
-			"name":  name,
+			"user_id": res.LinkedUserID,
+			"email":   res.Email,
+			"role":    res.RoleName,
 		})
 	}
 }
@@ -142,6 +218,7 @@ func LoginUser(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		recordLoginSuccessClearThrottle(c.Request.Context(), email)
+		_ = AuthStore.TouchOperatorLoginByEmail(ctx, email)
 		raw, err := authstore.NewOpaqueToken()
 		if err != nil {
 			respond.Error(c, http.StatusInternalServerError, api.CodeInternal, "login failed", nil)

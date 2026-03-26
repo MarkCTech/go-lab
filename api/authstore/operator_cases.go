@@ -12,6 +12,11 @@ import (
 
 // Operator case workflow: platform governance records; Marble applies gameplay effects out of band.
 
+var (
+	ErrInvalidCaseStatus   = errors.New("invalid case status")
+	ErrInvalidCasePriority = errors.New("invalid case priority")
+)
+
 const (
 	CaseStatusOpen       = "open"
 	CaseStatusInProgress = "in_progress"
@@ -26,6 +31,24 @@ const (
 	CasePriorityUrgent = "urgent"
 )
 
+func isValidCaseStatus(v string) bool {
+	switch v {
+	case CaseStatusOpen, CaseStatusInProgress, CaseStatusResolved, CaseStatusClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidCasePriority(v string) bool {
+	switch v {
+	case CasePriorityLow, CasePriorityNormal, CasePriorityHigh, CasePriorityUrgent:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	CaseActionSanction        = "sanction"
 	CaseActionRecoveryRequest = "recovery_request"
@@ -34,17 +57,17 @@ const (
 
 // OperatorCaseRow is one row from operator_cases.
 type OperatorCaseRow struct {
-	ID                     int64
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	Status                 string
-	Priority               string
-	SubjectPlatformUserID  int
-	SubjectCharacterRef    sql.NullString
-	Title                  string
-	Description            sql.NullString
-	CreatedByUserID        int
-	AssignedToUserID       sql.NullInt64
+	ID                    int64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	Status                string
+	Priority              string
+	SubjectPlatformUserID int
+	SubjectCharacterRef   sql.NullString
+	Title                 string
+	Description           sql.NullString
+	CreatedByUserID       int
+	AssignedToUserID      sql.NullInt64
 }
 
 // OperatorCaseNoteRow is a note on a case.
@@ -58,21 +81,21 @@ type OperatorCaseNoteRow struct {
 
 // OperatorCaseActionRow is an append-only action on a case.
 type OperatorCaseActionRow struct {
-	ID           int64
-	CaseID       int64
-	CreatedAt    time.Time
-	ActionKind   string
-	PayloadJSON  []byte
-	Reason       sql.NullString
-	ActorUserID  int
+	ID          int64
+	CaseID      int64
+	CreatedAt   time.Time
+	ActionKind  string
+	PayloadJSON []byte
+	Reason      sql.NullString
+	ActorUserID int
 }
 
 // ListOperatorCasesQuery filters list results.
 type ListOperatorCasesQuery struct {
-	Limit          int
-	Status         string
-	SubjectUserID  *int
-	BeforeID       *int64
+	Limit         int
+	Status        string
+	SubjectUserID *int
+	BeforeID      *int64
 }
 
 // CreateOperatorCase inserts a new case.
@@ -86,6 +109,9 @@ func (s *Store) CreateOperatorCase(ctx context.Context, subjectUserID int, chara
 	}
 	if priority == "" {
 		priority = CasePriorityNormal
+	}
+	if !isValidCasePriority(priority) {
+		return 0, ErrInvalidCasePriority
 	}
 	var desc any
 	if strings.TrimSpace(description) != "" {
@@ -198,12 +224,20 @@ func (s *Store) UpdateOperatorCase(ctx context.Context, id int64, status, priori
 	var sets []string
 	var args []any
 	if status != nil && strings.TrimSpace(*status) != "" {
+		nextStatus := strings.TrimSpace(*status)
+		if !isValidCaseStatus(nextStatus) {
+			return ErrInvalidCaseStatus
+		}
 		sets = append(sets, "status = ?")
-		args = append(args, strings.TrimSpace(*status))
+		args = append(args, nextStatus)
 	}
 	if priority != nil && strings.TrimSpace(*priority) != "" {
+		nextPriority := strings.TrimSpace(*priority)
+		if !isValidCasePriority(nextPriority) {
+			return ErrInvalidCasePriority
+		}
 		sets = append(sets, "priority = ?")
-		args = append(args, strings.TrimSpace(*priority))
+		args = append(args, nextPriority)
 	}
 	if assignedToUserID != nil {
 		if *assignedToUserID <= 0 {

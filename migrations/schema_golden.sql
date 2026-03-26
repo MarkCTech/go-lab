@@ -48,7 +48,7 @@ CREATE TABLE `auth_audit_events` (
   KEY `idx_auth_audit_created` (`created_at`),
   KEY `idx_auth_audit_user` (`user_id`),
   KEY `idx_auth_audit_type` (`event_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=45 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `auth_desktop_exchange_codes`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -69,7 +69,7 @@ CREATE TABLE `auth_desktop_exchange_codes` (
   KEY `idx_auth_desktop_exchange_expires` (`expires_at`),
   KEY `idx_auth_desktop_exchange_consumed` (`consumed_at`),
   CONSTRAINT `fk_auth_desktop_exchange_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `auth_refresh_tokens`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -110,7 +110,7 @@ CREATE TABLE `auth_sessions` (
   KEY `idx_auth_sessions_user` (`user_id`),
   KEY `idx_auth_sessions_revoked` (`revoked_at`),
   CONSTRAINT `fk_auth_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `backup_restore_requests`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -141,7 +141,7 @@ CREATE TABLE `backup_restore_requests` (
   CONSTRAINT `fk_backup_restore_approval_1` FOREIGN KEY (`approval_1_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_backup_restore_approval_2` FOREIGN KEY (`approval_2_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_backup_restore_requested_by` FOREIGN KEY (`requested_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `economy_ledger_events`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -162,6 +162,41 @@ CREATE TABLE `economy_ledger_events` (
   KEY `idx_economy_ledger_event_type` (`event_type`),
   CONSTRAINT `fk_economy_ledger_user` FOREIGN KEY (`platform_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `operator_account_roles`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `operator_account_roles` (
+  `operator_account_id` bigint unsigned NOT NULL,
+  `role_id` smallint unsigned NOT NULL,
+  `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`operator_account_id`,`role_id`),
+  KEY `idx_operator_account_roles_role` (`role_id`),
+  CONSTRAINT `fk_operator_account_roles_account` FOREIGN KEY (`operator_account_id`) REFERENCES `operator_accounts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_operator_account_roles_role` FOREIGN KEY (`role_id`) REFERENCES `platform_roles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `operator_accounts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `operator_accounts` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `linked_user_id` int NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'active',
+  `invited_by_user_id` int DEFAULT NULL,
+  `last_login_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_operator_accounts_linked_user` (`linked_user_id`),
+  UNIQUE KEY `uq_operator_accounts_email` (`email`),
+  KEY `idx_operator_accounts_status` (`status`),
+  KEY `idx_operator_accounts_invited_by` (`invited_by_user_id`),
+  CONSTRAINT `fk_operator_accounts_invited_by` FOREIGN KEY (`invited_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_operator_accounts_linked_user` FOREIGN KEY (`linked_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `operator_case_actions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -222,7 +257,34 @@ CREATE TABLE `operator_cases` (
   CONSTRAINT `fk_operator_cases_assigned_to` FOREIGN KEY (`assigned_to_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_operator_cases_created_by` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_operator_cases_subject_user` FOREIGN KEY (`subject_platform_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `operator_invites`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `operator_invites` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `token_hash` char(64) NOT NULL COMMENT 'SHA-256 hex of one-time invite token',
+  `email` varchar(255) NOT NULL,
+  `display_name` varchar(100) NOT NULL,
+  `role_name` varchar(64) NOT NULL,
+  `linked_user_id` int DEFAULT NULL,
+  `invited_by_user_id` int DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` timestamp NOT NULL,
+  `consumed_at` timestamp NULL DEFAULT NULL,
+  `meta_json` json DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_operator_invites_token_hash` (`token_hash`),
+  KEY `idx_operator_invites_email` (`email`),
+  KEY `idx_operator_invites_expires` (`expires_at`),
+  KEY `idx_operator_invites_consumed` (`consumed_at`),
+  KEY `idx_operator_invites_role_name` (`role_name`),
+  KEY `fk_operator_invites_linked_user` (`linked_user_id`),
+  KEY `fk_operator_invites_invited_by` (`invited_by_user_id`),
+  CONSTRAINT `fk_operator_invites_invited_by` FOREIGN KEY (`invited_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_operator_invites_linked_user` FOREIGN KEY (`linked_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `platform_roles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -273,9 +335,11 @@ CREATE TABLE `users` (
   `pennies` int NOT NULL DEFAULT '0',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_users_email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  UNIQUE KEY `idx_users_email` (`email`),
+  KEY `idx_users_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 

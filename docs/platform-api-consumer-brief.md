@@ -1,140 +1,48 @@
-# Platform API — integration overview
+# Platform API - consumer brief
 
-*Contract-first guide for TaskStack, Marble, and other HTTP clients. Treat the service as a documented HTTP API; the server implementation lives in this repository under the `api/` Go module.*
+Contract-first integration guide for TaskStack, Marble, and other clients.
 
-**Audience:** Engineers integrating TaskStack, Marble, or other suite components with this platform.
+## Canonical contract
 
-**Canonical contract:** [openapi.yaml](openapi.yaml) (validated in CI). This page summarizes behavior and links to topic guides.
+- OpenAPI: [openapi.yaml](openapi.yaml)
+- Planning status: [MASTER_PLAN.md](MASTER_PLAN.md)
+- Ownership boundaries: [data-ownership.md](data-ownership.md)
 
-**Planning and backlog:** [MASTER_PLAN.md](MASTER_PLAN.md) §7 (shipped), §8 (backlog). Short-form session notes: [CHAT_TODOS.md](../CHAT_TODOS.md).
+If a route or schema is not in OpenAPI, treat it as out of contract.
 
----
+## Invariants clients should assume
 
-## Base URL and versioning
+- Product API routes are versioned under `/api/v1`.
+- Responses use envelope shape (`data` on success, `error` on failure, plus `meta.request_id`).
+- `/api/*` routes outside `/api/v1` are legacy and return `410`.
+- `/healthz` and `/readyz` are root-level endpoints.
 
-- All product JSON routes are under **`/api/v1`**.
-- Health checks: **`/healthz`** (liveness) and **`/readyz`** (database and optional migration version). When **`MIGRATION_EXPECTED_VERSION`** is set, **`/readyz`** 200 responses include **`migration_version`** and **`migration_expected_min`** ([migrations.md](migrations.md)).
-- Deployments supply the host (for example `https://api.example.com`). Clients should configure a **base URL** and append paths from this document or from OpenAPI.
-- **Legacy paths:** requests under `/api/` that are not under `/api/v1` receive **410 Gone**. Clients must use `/api/v1` only.
+## Auth modes
 
----
+- Session cookie + CSRF: browser flows.
+- HS256 bearer: `POST /api/v1/auth/token` for machine usage, desktop bearer from desktop exchange flow.
+- OIDC bearer: enabled only when both `OIDC_ISSUER_URL` and `OIDC_AUDIENCE` are configured.
 
-## Response shape
+Human-only guard remains on `PUT`/`DELETE /api/v1/users/{id}`: machine (`client:*`) subjects are rejected.
 
-- **Success:** `{ "data": <payload>, "meta": { "request_id": "..." } }`
-- **Error:** `{ "error": { "code": "...", "message": "...", "details": ... }, "meta": { "request_id": "..." } }`
+## Desktop and game handoff
 
-Per-operation schemas are defined in OpenAPI.
+- Desktop login handoff uses:
+  1. `POST /api/v1/auth/desktop/start`
+  2. `POST /api/v1/auth/desktop/exchange`
+  3. `POST /api/v1/auth/join-token`
+- Marble validates join tokens game-side (`token_use=join`) per contract.
 
----
+Details: [desktop-auth-bridge.md](desktop-auth-bridge.md).
 
-## Authentication modes
+## Integration boundaries
 
-| Mode | When | Notes |
-|------|------|--------|
-| **Session cookie** | Browser flows (for example admin SPA or TaskStack web after login) | Issued by `POST /api/v1/auth/login`. Mutating requests with cookies require **CSRF**: the header (default `X-CSRF-Token`) must match the CSRF cookie. Use `GET /api/v1/auth/csrf` when needed. |
-| **Bearer (HS256)** | API clients, desktop after exchange | Platform JWT from `POST /api/v1/auth/token` (`client_credentials`) or user access token from `POST /api/v1/auth/desktop/exchange`. |
-| **Bearer (OIDC)** | When the deployment sets `OIDC_*` | RS256 access token; see [oidc-auth0.md](oidc-auth0.md). |
+- TaskStack should call platform from server-side paths for sensitive operations.
+- Do not ship `PLATFORM_CLIENT_SECRET` or equivalent long-lived secrets in browsers or client binaries.
+- Platform API does not execute physical backup/restore actions; it governs approval workflow only.
 
-Bearer-authenticated **mutations** do **not** require CSRF (double-submit applies to browser session cookies only).
+## Related
 
-**Machine clients:** `POST /api/v1/auth/token` with `grant_type=client_credentials` yields a subject such as `client:<id>`. **`PUT` and `DELETE` on `/api/v1/users/{id}` require a human end-user subject** (`user:...`). Machine tokens receive **403** for those operations. See OpenAPI `x-requiresHumanSubject` where applicable.
-
-**Bootstrap:** `POST /api/v1/auth/bootstrap` is a **development-oriented** bridge. Do **not** rely on it for production TaskStack or Marble flows — see [bootstrap-sunset.md](bootstrap-sunset.md).
-
----
-
-## Endpoint index (OpenAPI `operationId`)
-
-Use [openapi.yaml](openapi.yaml) for request and response bodies and security requirements.
-
-| operationId | Method | Path | Typical consumer |
-|-------------|--------|------|-------------------|
-| healthz | GET | `/healthz` | Operations, probes |
-| readyz | GET | `/readyz` | Orchestration, readiness gates |
-| authRegister | POST | `/api/v1/auth/register` | TaskStack backend / signup |
-| authLogin | POST | `/api/v1/auth/login` | Web login (cookie session) |
-| authLogout | POST | `/api/v1/auth/logout` | Web |
-| authRefresh | POST | `/api/v1/auth/refresh` | Web session renewal |
-| authCsrf | GET | `/api/v1/auth/csrf` | Browser clients |
-| authChangePassword | POST | `/api/v1/auth/change-password` | Authenticated human user |
-| authJoinToken | POST | `/api/v1/auth/join-token` | Marble join handoff (human session or user Bearer) |
-| authDesktopStart | POST | `/api/v1/auth/desktop/start` | Desktop login bridge (human user) |
-| authDesktopExchange | POST | `/api/v1/auth/desktop/exchange` | Desktop application (PKCE verifier) |
-| authToken | POST | `/api/v1/auth/token` | Machine-to-machine / `client_credentials` |
-| authBootstrap | POST | `/api/v1/auth/bootstrap` | Development only |
-| usersList | GET | `/api/v1/users` | Authenticated listing |
-| usersCreate | POST | `/api/v1/users` | Server-side provisioning (often M2M); align with your authorization model |
-| usersSearch | GET | `/api/v1/users/search` | Authenticated search |
-| usersGetById | GET | `/api/v1/users/{id}` | Profile and identity linkage |
-| usersUpdate | PUT | `/api/v1/users/{id}` | **Human user only** |
-| usersDelete | DELETE | `/api/v1/users/{id}` | **Human user only** |
-| platformEconomyLedgerList | GET | `/api/v1/economy/ledger` | Admin / ops (`economy.read`, human subject); read-only operator ledger |
-| platformBackupsStatus | GET | `/api/v1/backups/status` | Ops (`backups.read`); restore workflow counts |
-| platformBackupsRestoreRequestsList | GET | `/api/v1/backups/restore-requests` | Ops (`backups.read`) |
-| platformBackupsRestoreRequestCreate | POST | `/api/v1/backups/restore-requests` | Ops (`backups.restore.request` + reason header) |
-| platformBackupsRestoreRequestApprove | POST | `/api/v1/backups/restore-requests/{id}/approve` | Ops (`backups.restore.approve` + reason); not the requester |
-| platformBackupsRestoreRequestReject | POST | `/api/v1/backups/restore-requests/{id}/reject` | Ops (`backups.restore.approve` + reason) |
-| platformBackupsRestoreRequestFulfill | POST | `/api/v1/backups/restore-requests/{id}/fulfill` | Ops (`backups.restore.fulfill` + reason); after out-of-band restore |
-| platformBackupsRestoreRequestCancel | POST | `/api/v1/backups/restore-requests/{id}/cancel` | Requester (`backups.restore.request` + reason) |
-| platformCasesList | GET | `/api/v1/cases` | Ops (`cases.read`) |
-| platformCasesCreate | POST | `/api/v1/cases` | Ops (`cases.write` + reason) |
-| platformCasesGet | GET | `/api/v1/cases/{id}` | Ops (`cases.read`) |
-| platformCasesPatch | PATCH | `/api/v1/cases/{id}` | Ops (`cases.write` + reason) |
-| platformCasesNotesList | GET | `/api/v1/cases/{id}/notes` | Ops (`cases.read`) |
-| platformCasesNotesCreate | POST | `/api/v1/cases/{id}/notes` | Ops (`cases.write` + reason) |
-| platformCasesActionsList | GET | `/api/v1/cases/{id}/actions` | Ops (`cases.read`) |
-| platformCasesSanctionCreate | POST | `/api/v1/cases/{id}/sanctions` | Ops (`sanctions.write` + reason) |
-| platformCasesRecoveryCreate | POST | `/api/v1/cases/{id}/recovery-requests` | Ops (`recovery.write` + reason) |
-| platformCasesAppealResolve | POST | `/api/v1/cases/{id}/appeals/resolve` | Ops (`appeals.resolve` + reason) |
-
-Physical backup/restore execution is **not** performed by these routes — see [split-host-operations.md](split-host-operations.md).
-
----
-
-## Marble-oriented flow (desktop join)
-
-End-to-end sequence and security requirements: **[desktop-auth-bridge.md](desktop-auth-bridge.md)** (exchange codes, PKCE, callback host allowlist, join JWT).
-
-**Game-side responsibility:** Verify **join** JWTs (`token_use=join` per contract) using platform keys and TTL. Validation logic is implemented in **Marble**; the API contract is defined in OpenAPI.
-
-**Data boundaries:** [data-ownership.md](data-ownership.md).
-
----
-
-## TaskStack-oriented notes
-
-- Prefer **server-side** calls for signup and sensitive operations so **`PLATFORM_CLIENT_SECRET`** is never exposed to browsers.
-- Same-origin cookie setups typically proxy `/api` to the API host — see [platform-admin-ui.md](platform-admin-ui.md) and the repository [README.md](../README.md).
-
----
-
-## Configuration (integrators)
-
-Clients need a **base URL** and deployment-specific secrets (for example OAuth client configuration for the desktop bridge, or M2M credentials for `auth/token`). Operators configure environment variables listed in [`.env.example`](../.env.example). Do not embed long-lived secrets in end-user client binaries.
-
----
-
-## Prompt template (AI-assisted integration)
-
-Optional: use the following when onboarding a coding assistant to implement a client without reading Go sources.
-
-```text
-You are implementing an HTTP client for the Marble / TaskStack platform API.
-
-Contract (single source of truth for paths, methods, bodies, and errors):
-  - OpenAPI 3 file at repository root: docs/openapi.yaml
-  - Summary: docs/platform-api-consumer-brief.md
-
-Rules:
-  - All JSON API routes are under /api/v1. /healthz and /readyz are at the root.
-  - Success: { data, meta }. Error: { error, meta }.
-  - Browser session auth: cookie from POST /api/v1/auth/login; mutating requests need CSRF header matching CSRF cookie (see openapi info.description).
-  - Bearer: HS256 from POST /api/v1/auth/token (client_credentials) or desktop exchange; OIDC RS256 when OIDC_* is configured.
-  - PUT and DELETE /api/v1/users/{id} require a human user subject, not client:*.
-  - Do not use POST /api/v1/auth/bootstrap in production integrations.
-  - Desktop user login: docs/desktop-auth-bridge.md (PKCE, start, exchange, join-token as documented).
-  - The game must verify token_use=join JWTs locally per contract; implementation belongs in the game repository.
-
-Undocumented endpoints are out of scope; if it is not in openapi.yaml, it is not part of the public contract.
-```
+- [platform-control-plane.md](platform-control-plane.md)
+- [platform-admin-ui.md](platform-admin-ui.md)
+- [migrations.md](migrations.md)

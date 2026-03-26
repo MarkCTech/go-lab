@@ -10,7 +10,12 @@ import (
 func (s *Store) GetUserPasswordHashByID(ctx context.Context, userID int) (passwordHash string, err error) {
 	var hash sql.NullString
 	err = s.db.QueryRowContext(ctx,
-		`SELECT password_hash FROM users WHERE id = ?`,
+		`SELECT password_hash
+		 FROM operator_accounts oa
+		 INNER JOIN users u ON u.id = oa.linked_user_id
+		 WHERE oa.linked_user_id = ?
+		   AND oa.status = 'active'
+		   AND u.deleted_at IS NULL`,
 		userID,
 	).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -29,7 +34,12 @@ func (s *Store) GetUserPasswordHashByID(ctx context.Context, userID int) (passwo
 func (s *Store) GetUserAuthByEmail(ctx context.Context, email string) (id int, passwordHash string, err error) {
 	var hash sql.NullString
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id, password_hash FROM users WHERE email = ?`,
+		`SELECT oa.linked_user_id, oa.password_hash
+		 FROM operator_accounts oa
+		 INNER JOIN users u ON u.id = oa.linked_user_id
+		 WHERE oa.email = ?
+		   AND oa.status = 'active'
+		   AND u.deleted_at IS NULL`,
 		email,
 	).Scan(&id, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -46,19 +56,46 @@ func (s *Store) GetUserAuthByEmail(ctx context.Context, email string) (id int, p
 
 // CreateRegisteredUser inserts a user row with credentials (email unique enforced by DB).
 func (s *Store) CreateRegisteredUser(ctx context.Context, email, name, passwordHash string) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (name, email, password_hash, pennies) VALUES (?, ?, ?, 0)`,
-		name, email, passwordHash,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO users (name, pennies) VALUES (?, 0)`,
+		name,
 	)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	uid, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO operator_accounts (linked_user_id, email, password_hash, status)
+		 VALUES (?, ?, ?, 'active')`,
+		uid, email, passwordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return uid, nil
 }
 
 // UpdateUserPasswordHash sets password_hash for a user (caller supplies Argon2id-encoded hash).
 func (s *Store) UpdateUserPasswordHash(ctx context.Context, userID int, passwordHash string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, userID)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE operator_accounts oa
+		 INNER JOIN users u ON u.id = oa.linked_user_id
+		 SET oa.password_hash = ?
+		 WHERE oa.linked_user_id = ? AND u.deleted_at IS NULL`,
+		passwordHash, userID,
+	)
 	if err != nil {
 		return err
 	}

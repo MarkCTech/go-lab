@@ -1,29 +1,34 @@
-# Platform admin UI (Angular in go-lab)
+# Platform admin UI (Angular)
 
-## Role
+The SPA under [`client/`](../client/) is an operator console for platform-admin workflows in this repo.
 
-The Angular app under [`client/`](../client/) is an optional **operator console**: login, dashboard, user directory CRUD, and **permission-gated** nav (Cases, Players, Characters, Economy, DataOps, Security, Audit). **Cases**, Players, Characters, **Economy**, DataOps, Security, and Audit call gated `/api/v1/*` routes; nav items are **hidden unless** `GET /api/v1/security/me` reports the matching permission (e.g. `cases.read`). It is **not** the full suite control-plane UX — positioning vs TaskStack/Marble: [MASTER_PLAN.md](MASTER_PLAN.md), [data-ownership.md](data-ownership.md), [platform-api-consumer-brief.md](platform-api-consumer-brief.md).
+## Scope
 
-## Configuration
+- Auth: login/session handling, invite acceptance, logout, refresh.
+- Views: dashboard, users, players, characters, economy, cases, dataops, security, audit.
+- Role-aware navigation and actions based on `GET /api/v1/security/me`.
 
-See repo [README](../README.md) § Platform admin: `useBootstrapAuth`, **`apiBaseUrl: ''`** + same-origin proxy to `/api`, CORS vs `CORS_ALLOWED_ORIGINS`.
+It is not the full TaskStack control-plane product.
 
-## Navigation (this SPA)
+## Route usage
 
-- **Cases:** list, create, and detail (notes, sanctions, recovery, appeals) via `/api/v1/cases/*` (`cases.read`, `cases.write`, `sanctions.write`, `recovery.write`, `appeals.resolve`); see [`cases/`](../client/src/app/cases/).
-- **Players / Characters:** read-only JSON stubs; `GET` via [`platform.service.ts`](../client/src/app/platform.service.ts). **Economy** uses `GET /api/v1/economy/ledger` (`economy.read`).
-- **DataOps:** restore workflow UI — status + list + create/approve/reject/fulfill/cancel via `/api/v1/backups/*` (`backups.read`, `backups.restore.*`); **`X-Platform-Action-Reason`** (≥ 10 chars) on mutations. Physical restore execution is out of band ([split-host-operations.md](split-host-operations.md)).
-- **Security:** `GET /api/v1/security/me`; support ack **`POST /api/v1/support/ack`** with header **`X-Platform-Action-Reason`** (min length enforced server-side; UI requires ≥ 10 chars before submit).
-- **Audit:** `GET /api/v1/audit/admin-events`.
+The SPA consumes `/api/v1` endpoints documented in [openapi.yaml](openapi.yaml), with privileged surfaces mapped in [platform-control-plane.md](platform-control-plane.md).
 
-**Grant platform roles in SQL** — [platform-operator-roles.md](platform-operator-roles.md).
+Primary high-risk areas:
 
-## Session behavior
+- Cases workflow (`/api/v1/cases/*`)
+- Backup/restore governance (`/api/v1/backups/*`)
+- Support ack (`/api/v1/support/ack`)
 
-- After login, or when **`GET /api/v1/auth/csrf`** succeeds on reload, the app timers **`POST /api/v1/auth/refresh`** on `sessionRefreshIntervalMs` (cookie mode; skipped when `useBootstrapAuth` is true). Keep the interval safely under **`SESSION_IDLE_TTL_SECONDS`**.
-- **`UnauthorizedInterceptor`:** **401** on protected API calls clears auth and navigates to **`/login`** (with `session=expired` query param). **401** on login/register/bootstrap/token and on the initial **`GET /api/v1/auth/csrf`** probe is ignored.
+## Session and security behavior
 
-## Related
+- Cookie mode is default and uses CSRF (`GET /api/v1/auth/csrf` bootstrap + mutating header).
+- Refresh timer uses `POST /api/v1/auth/refresh`.
+- On protected-request `401`, the app clears auth state and redirects to `/login`.
+- Privileged mutations require `X-Platform-Action-Reason`; UI enforces minimum length before submit.
 
-- [platform-control-plane.md](platform-control-plane.md) — RBAC matrix, route ↔ permission.
-- [openapi.yaml](openapi.yaml) — contract.
+## Configuration pointers
+
+- Repo setup and same-origin guidance: [README.md](../README.md)
+- Auth/session details: [auth-session.md](auth-session.md)
+- Environment variable catalog: [`.env.example`](../.env.example)

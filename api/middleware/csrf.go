@@ -14,6 +14,7 @@ import (
 // CSRFExemptPathPrefixes are mutating auth routes that run before a CSRF cookie exists.
 var CSRFExemptPathPrefixes = []string{
 	"/api/v1/auth/register",
+	"/api/v1/auth/invite/accept",
 	"/api/v1/auth/login",
 	"/api/v1/auth/token",
 	"/api/v1/auth/bootstrap",
